@@ -1,0 +1,43 @@
+[seed]
+seed = 42
+
+[data]
+corpus = "hello world\n"
+block_size = 8
+
+[model]
+d_model = 64
+n_layers = 2
+max_seq_len = 8
+pos_mode = "learned"  # "sinusoidal" or "learned"
+
+n_heads = 1
+attn_bias = false
+attn_impl = "naive"
+
+mlp_hidden_mult = 4
+activation = "gelu"
+
+norm_mode = "pre"
+layer_norm_eps = 1e-5
+
+dropout = 0.1
+tie_embeddings = true
+
+[train]
+steps = 300
+lr = 1e-3
+log_every = 50
+
+optimizer = "adamw"
+weight_decay = 0.01
+batch_size = 0
+shuffle = false
+grad_clip = 0.0
+device = "cpu"
+
+[gen]
+temperature = 1.0
+top_k = 0
+max_new_tokens = 100
+seed = 1337

@@ -1,0 +1,27 @@
+[model]
+d_model = 64
+num_layers = 2
+num_heads = 1
+
+max_seq_len = 64
+
+# --- attention ---
+attn_bias = false            # allow bias in QKV projections
+attn_impl = "naive"          # future-proof: naive | flash (default naive)
+
+# --- MLP ---
+mlp_hidden_mult = 4          # d_ff = mlp_hidden_mult * d_model
+activation = "gelu"          # gelu | relu
+
+# --- normalization ---
+norm_mode = "pre"            # pre | post
+layer_norm_eps = 1e-5
+
+# --- dropout ---
+dropout = 0.0                # keep 0.0 for deterministic baseline
+
+# --- embeddings ---
+pos_mode = "learned"         # learned | sinusoidal
+tie_embeddings = true        # tie input embedding to output head
+
+# vocab_size stays injected at runtime

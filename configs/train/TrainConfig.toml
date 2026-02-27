@@ -1,0 +1,14 @@
+[train]
+steps = 300
+lr = 3e-4
+optimizer = "adamw"          # adamw | sgd (optional later)
+weight_decay = 0.01
+
+batch_size = 0               # 0 = full batch (current behavior)
+shuffle = false              # deterministic default
+
+grad_clip = 0.0              # 0.0 disables
+
+device = "cpu"               # cpu | cuda (assert cpu for now)
+
+log_every = 50
