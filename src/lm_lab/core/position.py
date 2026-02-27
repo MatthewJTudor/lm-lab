@@ -53,7 +53,7 @@ class PositionEmbedding(nn.Module):
         position = torch.arange(0, max_seq_len, dtype=torch.float32).unsqueeze(1) # (L, 1)
         div_term = torch.exp(
             torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model)
-        ) # (L, d)
+        ) # (d_model/2, d)
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -74,4 +74,5 @@ class PositionEmbedding(nn.Module):
             return self.embedding(positions)
 
         # sinusoidal
-        return self._pe[:T, :].unsqueeze(0).expand(B, T, self.cfg.d_model)
+        pe = self._pe[:T].to(device=x.device)
+        return pe.unsqueeze(0).expand(B, -1, -1)
