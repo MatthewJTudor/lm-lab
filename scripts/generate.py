@@ -168,7 +168,6 @@ def main() -> None:
 
     # Determinism (CPU baseline)
     seed_everything(replace(cfg.seed, seed=gen_seed))
-    torch.manual_seed(gen_seed)
 
     # Build model, load weights
     from lm_lab.core.model import TransformerLM  # keep script boundary clean

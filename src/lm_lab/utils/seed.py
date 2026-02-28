@@ -15,23 +15,36 @@ class SeedConfig:
 
 def seed_everything(cfg: SeedConfig) -> None:
     """
-    Seed all RNGs we control.
-
-    This is intentionally minimal right now (no torch yet).
-    We'll extend it later with torch + cuda determinism settings.
+    Seed all RNGs we control (python, numpy, torch).
+    Safe baseline for CPU. CUDA determinism optional.
     """
+
     if cfg.python_hash_seed:
-        # Must be set before Python starts to fully guarantee hash stability,
-        # but setting it here still helps for subprocesses and makes intent explicit.
         os.environ["PYTHONHASHSEED"] = str(cfg.seed)
 
     random.seed(cfg.seed)
 
     try:
-        import numpy as np  # local import to avoid hard dependency assumptions
-    except Exception:
-        np = None
-
-    if np is not None:
+        import numpy as np
         np.random.seed(cfg.seed)
+    except Exception:
+        pass
+
+    try:
+        import torch
+
+        torch.manual_seed(cfg.seed)
+
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(cfg.seed)
+            torch.cuda.manual_seed_all(cfg.seed)
+
+        # Optional: full determinism (slower but strict)
+        if getattr(cfg, "deterministic_torch", False):
+            torch.use_deterministic_algorithms(True)
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+
+    except Exception:
+        pass
 
