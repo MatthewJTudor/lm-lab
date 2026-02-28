@@ -2,13 +2,14 @@
 seed = 42
 
 [data]
-corpus = "hello world\n"
-block_size = 8
+corpus_path = "data/corpus.txt"
+corpus = ""
+block_size = 64
 
 [model]
 d_model = 64
 n_layers = 2
-max_seq_len = 8
+max_seq_len = 64
 pos_mode = "learned"  # "sinusoidal" or "learned"
 
 n_heads = 1
@@ -25,13 +26,13 @@ dropout = 0.1
 tie_embeddings = true
 
 [train]
-steps = 300
+steps = 10000
 lr = 1e-3
 log_every = 50
 
 optimizer = "adamw"
 weight_decay = 0.01
-batch_size = 0
+batch_size = 64
 shuffle = false
 grad_clip = 0.0
 device = "cpu"
@@ -39,5 +40,6 @@ device = "cpu"
 [gen]
 temperature = 1.0
 top_k = 0
+top_p =1.0
 max_new_tokens = 100
 seed = 1337

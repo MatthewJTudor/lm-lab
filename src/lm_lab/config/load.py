@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tomllib
-from typing import Literal, Optional
+from typing import Optional
 
 from lm_lab.utils.seed import SeedConfig
 from lm_lab.data.sequence_dataset import SequenceDatasetConfig
@@ -13,6 +13,7 @@ from lm_lab.core.model import TransformerLMConfig
 class GenConfig:
     temperature: float = 1.0
     top_k: int = 0
+    top_p: float = 1.0
     max_new_tokens: int = 100
     seed: int = 1337
 
@@ -26,7 +27,7 @@ class TrainConfig:
     weight_decay: float = 0.01
 
     batch_size: int = 0  # 0 => full batch (today)
-    shuffle: bool = False
+    shuffle: bool = True
 
     grad_clip: float = 0.0
     device: str = "cpu"
@@ -39,18 +40,45 @@ class RunConfig:
     model: TransformerLMConfig
     train: TrainConfig
     gen: Optional[GenConfig] = None
+    data_text_path: Optional[str] = None
 
 
 def load_run_config(path: str | Path) -> RunConfig:
-    p = Path(path)
+    p = Path(path).resolve()
+    cfg_dir = p.parent
+
+    # Heuristic: configs/ is one level under repo root
+    repo_root = cfg_dir.parent
     raw = tomllib.loads(p.read_text(encoding="utf-8"))
 
     seed_cfg = SeedConfig(seed=int(raw["seed"]["seed"]))
 
-    data_text = str(raw["data"]["corpus"])
+    data_raw = raw["data"]
+
+    corpus_path = str(data_raw.get("corpus_path", "")).strip()
+    corpus_inline = str(data_raw.get("corpus", "")).strip()
+
+    if corpus_path:
+        corpus_rel = Path(corpus_path)
+        if corpus_rel.is_absolute():
+            corpus_p = corpus_rel
+        else:
+            # Prefer repo-root (matches your layout: <root>/data, <root>/configs)
+            corpus_p = (repo_root / corpus_rel).resolve()
+            if not corpus_p.exists():
+                # Fallback: relative to config directory
+                corpus_p = (cfg_dir / corpus_rel).resolve()
+
+        data_text = corpus_p.read_text(encoding="utf-8")
+        data_text_path = str(corpus_p)
+    elif corpus_inline:
+        data_text = corpus_inline
+        data_text_path = None
+    else:
+        raise ValueError("No corpus provided. Set [data].corpus_path or [data].corpus in run.toml.")
+
     data_cfg = SequenceDatasetConfig(block_size=int(raw["data"]["block_size"]))
 
-    # extend TransformerLMConfig to include pos_mode if you haven’t already
     model_raw = raw["model"]
     model_cfg = TransformerLMConfig(
         vocab_size=0,  # filled after tokenizer build
@@ -88,7 +116,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         optimizer=str(train_raw.get("optimizer", "adamw")),
         weight_decay=float(train_raw.get("weight_decay", 0.01)),
         batch_size=int(train_raw.get("batch_size", 0)),
-        shuffle=bool(train_raw.get("shuffle", False)),
+        shuffle=bool(train_raw.get("shuffle", True)),
         grad_clip=float(train_raw.get("grad_clip", 0.0)),
         device=str(train_raw.get("device", "cpu")),
     )
@@ -99,6 +127,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         gen_cfg = GenConfig(
             temperature=float(gen_raw.get("temperature", 1.0)),
             top_k=int(gen_raw.get("top_k", 0)),
+            top_p=float(gen_raw.get("top_p", 1.0)),
             max_new_tokens=int(gen_raw.get("max_new_tokens", 100)),
             seed=int(gen_raw.get("seed", 1337)),
         )
@@ -110,4 +139,5 @@ def load_run_config(path: str | Path) -> RunConfig:
         model=model_cfg,
         train=train_cfg,
         gen=gen_cfg,
+        data_text_path=data_text_path
     )

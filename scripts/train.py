@@ -36,6 +36,17 @@ def build_full_batch(ds: SequenceDataset) -> tuple[torch.Tensor, torch.Tensor]:
     y_batch = torch.from_numpy(np.stack(y_list)).long()
     return x_batch, y_batch
 
+def build_batch(ds: SequenceDataset, idxs: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+    x_list: list[np.ndarray] = []
+    y_list: list[np.ndarray] = []
+    for i in idxs:
+        x, y = ds[int(i)]
+        x_list.append(x)
+        y_list.append(y)
+    x_batch = torch.from_numpy(np.stack(x_list)).long()
+    y_batch = torch.from_numpy(np.stack(y_list)).long()
+    return x_batch, y_batch
+
 
 def make_run_dir(runs_dir: Path) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -82,8 +93,7 @@ def main() -> None:
             "For now these must be equal."
         )
 
-    # One full batch once (B = len(ds))
-    x_batch, y_batch = build_full_batch(ds)
+
 
     # Model (fill vocab_size after tokenizer build)
     from lm_lab.core.model import TransformerLM  # local import keeps script boundary clean
@@ -93,10 +103,22 @@ def main() -> None:
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr)
 
+    N = len(ds)
+    bs = getattr(cfg.train, "batch_size", 0) or 0
+    use_full_batch = (bs == 0) or (bs >= N)
+
+    rng = np.random.default_rng(cfg.seed.seed)
+
     # Train
     for step in range(cfg.train.steps):
-        logits = model(x_batch)  # (B, T, V)
+        if use_full_batch:
+            idxs = np.arange(N, dtype=np.int64)
+        else:
+            idxs = rng.integers(low=0, high=N, size=bs, dtype=np.int64)
 
+        x_batch, y_batch = build_batch(ds, idxs)
+
+        logits = model(x_batch)  # (B, T, V)
         B, T, V = logits.shape
         loss = F.cross_entropy(
             logits.reshape(B * T, V),

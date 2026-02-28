@@ -34,3 +34,4 @@ def seed_everything(cfg: SeedConfig) -> None:
 
     if np is not None:
         np.random.seed(cfg.seed)
+
