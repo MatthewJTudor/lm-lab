@@ -60,19 +60,22 @@ class PositionEmbedding(nn.Module):
 
         return pe # (L, d)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x is only used for (B, T) shape + device.
-        returns: (B, T, d_model)
-        """
+    def forward(self, x: torch.Tensor, pos_offset: int = 0) -> torch.Tensor:
         B, T = x.shape
         if T > self.cfg.max_seq_len:
             raise ValueError("Sequence length exceeds max_seq_len")
 
+        if pos_offset < 0:
+            raise ValueError("pos_offset must be >= 0")
+
         if self.cfg.mode == "learned":
-            positions = torch.arange(T, device=x.device).unsqueeze(0).expand(B, T)
+            positions = (torch.arange(T, device=x.device) + pos_offset).unsqueeze(0).expand(B, T)
+            if positions.max().item() >= self.cfg.max_seq_len:
+                raise ValueError("Position index exceeds max_seq_len (increase max_seq_len).")
             return self.embedding(positions)
 
-        # sinusoidal
-        pe = self._pe[:T].to(device=x.device)
+        end = pos_offset + T
+        if end > self.cfg.max_seq_len:
+            raise ValueError("Position index exceeds max_seq_len (increase max_seq_len).")
+        pe = self._pe[pos_offset:end].to(device=x.device)
         return pe.unsqueeze(0).expand(B, -1, -1)

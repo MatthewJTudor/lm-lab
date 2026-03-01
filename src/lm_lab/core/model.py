@@ -9,6 +9,7 @@ import torch.nn as nn
 from lm_lab.core.embedding import TokenEmbedding, EmbeddingConfig
 from lm_lab.core.position import PositionEmbedding, PositionEmbeddingConfig
 from lm_lab.core.block import TransformerBlock, TransformerBlockConfig
+from lm_lab.core.attention import KVCache
 
 @dataclass(frozen=True)
 class TransformerLMConfig:
@@ -80,6 +81,83 @@ class TransformerLM(nn.Module):
             self.head.weight = self.token_emb.embedding.weight
 
         self.drop = nn.Dropout(cfg.dropout)
+
+    from lm_lab.core.attention import KVCache
+
+    def _crop_past_kvs(
+            self,
+            past_kvs: list[KVCache | None],
+            keep: int,
+    ) -> list[KVCache | None]:
+        if keep <= 0:
+            return [None] * len(past_kvs)
+
+        out: list[KVCache | None] = []
+        for kv in past_kvs:
+            if kv is None:
+                out.append(None)
+                continue
+            # kv.k: (B,H,T,D)
+            if kv.k.size(2) > keep:
+                out.append(
+                    KVCache(
+                        k=kv.k[:, :, -keep:, :].contiguous(),
+                        v=kv.v[:, :, -keep:, :].contiguous(),
+                    )
+                )
+            else:
+                out.append(kv)
+        return out
+
+    def forward_kv(
+            self,
+            idx: torch.Tensor,  # (B,T)
+            past_kvs: list[KVCache | None] | None = None,
+            use_cache: bool = True,
+    ) -> tuple[torch.Tensor, list[KVCache | None]]:
+        """
+        Cache-aware forward for generation.
+        If past_kvs is None: full prompt pass; caches are built.
+        If past_kvs is provided: recommended idx has T=1.
+        Returns (logits, new_kvs).
+        """
+        B, T = idx.shape
+        if T > self.cfg.max_seq_len:
+            raise ValueError("Sequence length exceeds maximum sequence length.")
+
+        if past_kvs is not None:
+            # We are about to append T new tokens; keep only last (max_seq_len - T)
+            keep = self.cfg.max_seq_len - T
+            if keep < 0:
+                raise ValueError("T exceeds max_seq_len in forward_kv incremental path.")
+            past_kvs = self._crop_past_kvs(past_kvs, keep=keep)
+
+        tok = self.token_emb(idx)
+
+        # position offset handled below (see PositionEmbedding patch)
+        # For warmup (past_kvs is None): offset=0
+        # For incremental (past_kvs not None, recommended T=1): offset = cached_len (or total_len - T)
+        pos_offset = 0
+        if past_kvs is not None and past_kvs[0] is not None:
+            # cached length so far (per layer cache length should match)
+            pos_offset = past_kvs[0].k.size(2)
+
+        pos = self.pos_emb(idx, pos_offset=pos_offset)
+        x = self.drop(tok + pos)
+
+        if past_kvs is None:
+            past_kvs = [None] * len(self.blocks)
+        if len(past_kvs) != len(self.blocks):
+            raise ValueError("past_kvs must match number of layers")
+
+        new_kvs: list[KVCache | None] = []
+        for i, block in enumerate(self.blocks):
+            x, present = block.forward_kv(x, past_kv=past_kvs[i], use_cache=use_cache)
+            new_kvs.append(present)
+
+        x = self.ln_f(x)
+        logits = self.head(x)
+        return logits, new_kvs
 
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         """

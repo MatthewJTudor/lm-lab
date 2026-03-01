@@ -56,7 +56,11 @@ def load_run_config(path: str | Path) -> RunConfig:
     data_raw = raw["data"]
 
     corpus_path = str(data_raw.get("corpus_path", "")).strip()
-    corpus_inline = str(data_raw.get("corpus", "")).strip()
+
+    corpus_inline = data_raw.get("corpus", "")
+    if corpus_inline is None:
+        corpus_inline = ""
+    corpus_inline = str(corpus_inline)  # DO NOT strip: preserve newlines
 
     if corpus_path:
         corpus_rel = Path(corpus_path)

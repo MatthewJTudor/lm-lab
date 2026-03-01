@@ -7,6 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+@dataclass
+class KVCache:
+    k: torch.Tensor  # (B, H, T_cache, D)
+    v: torch.Tensor  # (B, H, T_cache, D)
+
 @dataclass(frozen=True)
 class AttentionConfig:
     d_model: int
@@ -52,39 +57,58 @@ class SelfAttention(nn.Module):
             self._causal_mask = mask  # (T, T)
         return self._causal_mask[:T, :T].view(1, 1, T, T)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_kv(
+        self,
+        x: torch.Tensor,              # (B, T, C)
+        past_kv: KVCache | None = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, KVCache | None]:
         """
-        x: (B, T, d_model)
-        returns: (B, T, d_model)
+        If past_kv is provided, expected x has T=1 for fast incremental decode.
+        Returns (out, present_kv) if use_cache else (out, None).
         """
         B, T, C = x.shape
         H = self.n_heads
         D = self.d_head
 
-        # Project once, then reshape to heads
-        qkv = self.W_qkv(x) # (B, T, 3*C)
+        qkv = self.W_qkv(x)  # (B, T, 3*C)
         qkv = qkv.view(B, T, 3, H, D)
-        q, k, v = qkv.unbind(dim=2) # each (B, T, H, D)
+        q, k, v = qkv.unbind(dim=2)  # (B, T, H, D)
 
-        # Move heads forward: (B, H, T, D)
-        q = q.transpose(1, 2)
+        q = q.transpose(1, 2)  # (B, H, T, D)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # Scaled dot-product attention: (B, H, T, T)
-        att = (q @ k.transpose(-2, -1)) / math.sqrt(D)
+        if past_kv is not None:
+            # Incremental decode path (recommended T=1)
+            k_cat = torch.cat([past_kv.k, k], dim=2)  # (B,H,T_cache+T,D)
+            v_cat = torch.cat([past_kv.v, v], dim=2)
+            k_used, v_used = k_cat, v_cat
+        else:
+            k_used, v_used = k, v
 
-        # Causal mask
-        mask = self._get_causal_mask(T, x.device) # (1, 1, T, T)
-        att = att.masked_fill(~mask, float('-inf'))
+        # Attention scores: (B, H, T, T_k)
+        att = (q @ k_used.transpose(-2, -1)) / math.sqrt(D)
 
-        weights = F.softmax(att, dim=-1) # (B, H, T, T)
+        if past_kv is None:
+            # Only need causal mask when doing full-seq attention
+            mask = self._get_causal_mask(T, x.device)  # (1,1,T,T)
+            att = att.masked_fill(~mask, float("-inf"))
+        # else: cached decode has no "future" tokens, so no mask needed
 
-        out = weights @ v # (B, H, T, D)
+        weights = F.softmax(att, dim=-1)
+        out = weights @ v_used  # (B,H,T,D)
 
-        # Back to (B, T, C)
         out = out.transpose(1, 2).contiguous().view(B, T, C)
-
         out = self.W_o(out)
         out = self.drop(out)
+
+        present = None
+        if use_cache:
+            present = KVCache(k=k_used, v=v_used)
+
+        return out, present
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out, _ = self.forward_kv(x, past_kv=None, use_cache=False)
         return out

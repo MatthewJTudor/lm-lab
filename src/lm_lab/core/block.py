@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 from lm_lab.core.attention import SelfAttention, AttentionConfig
+from lm_lab.core.attention import KVCache
 
 @dataclass(frozen=True)
 class TransformerBlockConfig:
@@ -54,6 +55,17 @@ class TransformerBlock(nn.Module):
             raise ValueError(f"Unsupported activation {cfg.activation}")
 
         self.drop = nn.Dropout(cfg.dropout)
+
+    def forward_kv(
+            self,
+            x: torch.Tensor,
+            past_kv: KVCache | None = None,
+            use_cache: bool = False,
+    ) -> tuple[torch.Tensor, KVCache | None]:
+        attn_out, present = self.attn.forward_kv(self.ln1(x), past_kv=past_kv, use_cache=use_cache)
+        x = x + attn_out
+        x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
+        return x, present
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln1(x))
