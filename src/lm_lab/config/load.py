@@ -9,6 +9,7 @@ from lm_lab.utils.seed import SeedConfig
 from lm_lab.data.sequence_dataset import SequenceDatasetConfig
 from lm_lab.core.model import TransformerLMConfig
 
+
 @dataclass(frozen=True)
 class GenConfig:
     temperature: float = 1.0
@@ -16,6 +17,7 @@ class GenConfig:
     top_p: float = 1.0
     max_new_tokens: int = 100
     seed: int = 1337
+
 
 @dataclass(frozen=True)
 class TrainConfig:
@@ -32,6 +34,12 @@ class TrainConfig:
     grad_clip: float = 0.0
     device: str = "cpu"
 
+
+@dataclass(frozen=True)
+class TokenizerConfig:
+    mode: str = "char"
+
+
 @dataclass(frozen=True)
 class RunConfig:
     seed: SeedConfig
@@ -39,6 +47,7 @@ class RunConfig:
     data: SequenceDatasetConfig
     model: TransformerLMConfig
     train: TrainConfig
+    tokenizer: TokenizerConfig
     gen: Optional[GenConfig] = None
     data_text_path: Optional[str] = None
 
@@ -125,6 +134,11 @@ def load_run_config(path: str | Path) -> RunConfig:
         device=str(train_raw.get("device", "cpu")),
     )
 
+    tok_raw = raw.get("tokenizer", {})
+    tok_cfg = TokenizerConfig(
+        mode=str(tok_raw.get("mode", "char")),
+    )
+
     gen_cfg = None
     if "gen" in raw:
         gen_raw = raw["gen"]
@@ -142,6 +156,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         data=data_cfg,
         model=model_cfg,
         train=train_cfg,
+        tokenizer=tok_cfg,
         gen=gen_cfg,
-        data_text_path=data_text_path
+        data_text_path=data_text_path,
     )

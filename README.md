@@ -1,4 +1,4 @@
-
+# UNDER CONSTRUCTION
 # LM-Lab
 
 A minimal, deterministic GPT-style Transformer language model implemented from first principles in PyTorch.

@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 
 from lm_lab.config.load import load_run_config
-from lm_lab.tokenization.char import CharTokenizer
+from lm_lab.tokenization.build import build_tokenizer
 from lm_lab.utils.seed import seed_everything
 from lm_lab.inference.sampling import sample_next_token
 
@@ -58,7 +58,7 @@ def main() -> None:
     cfg = load_run_config(args.config)
 
     # Tokenizer must match training corpus for this v0 setup
-    tok = CharTokenizer.build(cfg.data_text)
+    tok = build_tokenizer(cfg.tokenizer, cfg.data_text)
 
     # Resolve gen defaults: CLI > config.gen > hard defaults
     gen_temp: float = 0.0
@@ -98,7 +98,7 @@ def main() -> None:
     model = TransformerLM(model_cfg)
 
     ckpt_path = Path(args.ckpt) if args.ckpt else _find_latest_checkpoint(Path(args.runs_dir))
-    state = torch.load(ckpt_path, map_location="cpu")
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state)
     model.eval()
 

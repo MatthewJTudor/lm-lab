@@ -82,7 +82,7 @@ class TransformerLM(nn.Module):
 
         self.drop = nn.Dropout(cfg.dropout)
 
-    from lm_lab.core.attention import KVCache
+
 
     def _crop_past_kvs(
             self,

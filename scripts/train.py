@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 from lm_lab.config.load import load_run_config
 from lm_lab.data.sequence_dataset import SequenceDataset
-from lm_lab.tokenization.char import CharTokenizer
+from lm_lab.tokenization.build import build_tokenizer
 from lm_lab.utils.seed import seed_everything
 
 
@@ -36,6 +36,7 @@ def build_full_batch(ds: SequenceDataset) -> tuple[torch.Tensor, torch.Tensor]:
     y_batch = torch.from_numpy(np.stack(y_list)).long()
     return x_batch, y_batch
 
+
 def build_batch(ds: SequenceDataset, idxs: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
     x_list: list[np.ndarray] = []
     y_list: list[np.ndarray] = []
@@ -54,16 +55,28 @@ def make_run_dir(runs_dir: Path) -> Path:
     run_dir.mkdir(parents=True, exist_ok=False)
     return run_dir
 
+
 def eval_loss(model: torch.nn.Module, x: torch.Tensor, y: torch.Tensor) -> float:
+    """
+    Evaluate loss on a provided batch.
+    Ensures tensors are on the same device as the model.
+    """
     was_training = model.training
     model.eval()
+
+    dev = next(model.parameters()).device
+    x = x.to(dev)
+    y = y.to(dev)
+
     with torch.no_grad():
         logits = model(x)
         B, T, V = logits.shape
         loss = F.cross_entropy(logits.view(B * T, V), y.view(B * T))
+
     if was_training:
         model.train()
     return float(loss.item())
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal deterministic LM training loop")
@@ -74,12 +87,17 @@ def main() -> None:
 
     cfg = load_run_config(args.config)
 
-    # Determinism (CPU baseline)
+    if cfg.train.shuffle:
+        print("[warn] train.shuffle is currently unused (sampling regime is RNG-window based).")
+
+    # Determinism baseline
     seed_everything(cfg.seed)
-    torch.manual_seed(cfg.seed.seed)
+
+    # Device (CPU today; CUDA later)
+    device = torch.device(cfg.train.device)
 
     # Tokenizer + encode corpus
-    tok = CharTokenizer.build(cfg.data_text)
+    tok = build_tokenizer(cfg.tokenizer, cfg.data_text)
     tokens = tok.encode(cfg.data_text)
 
     # Dataset
@@ -93,15 +111,22 @@ def main() -> None:
             "For now these must be equal."
         )
 
-
-
     # Model (fill vocab_size after tokenizer build)
     from lm_lab.core.model import TransformerLM  # local import keeps script boundary clean
     model_cfg = replace(cfg.model, vocab_size=tok.vocab_size)
-    model = TransformerLM(model_cfg)
+    model = TransformerLM(model_cfg).to(device)
     model.train()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr)
+    # Optimizer
+    opt_name = getattr(cfg.train, "optimizer", "adamw").lower()
+    if opt_name == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=cfg.train.lr,
+            weight_decay=cfg.train.weight_decay,
+        )
+    else:
+        raise ValueError(f"Unsupported optimizer: {cfg.train.optimizer!r} (only 'adamw' supported)")
 
     N = len(ds)
     bs = getattr(cfg.train, "batch_size", 0) or 0
@@ -117,6 +142,8 @@ def main() -> None:
             idxs = rng.integers(low=0, high=N, size=bs, dtype=np.int64)
 
         x_batch, y_batch = build_batch(ds, idxs)
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
 
         logits = model(x_batch)  # (B, T, V)
         B, T, V = logits.shape
@@ -127,6 +154,10 @@ def main() -> None:
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+
+        if cfg.train.grad_clip and cfg.train.grad_clip > 0.0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.train.grad_clip)
+
         optimizer.step()
 
         if step % cfg.train.log_every == 0:

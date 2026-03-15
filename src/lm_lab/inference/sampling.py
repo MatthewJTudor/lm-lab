@@ -38,7 +38,8 @@ def top_p_filter(logits: torch.Tensor, p: float) -> torch.Tensor:
     keep = cum <= p
     keep[0] = True
     # shift right so we include the first above-threshold token
-    keep = torch.cat([torch.tensor([True], device=keep.device, dtype=torch.bool), keep[:-1]])
+    prefix = keep.new_ones((1,), dtype=torch.bool)  # same device
+    keep = torch.cat([prefix, keep[:-1]])
 
     # Map keep mask back to original index space
     keep_idx = sorted_idx[keep]
@@ -68,7 +69,7 @@ def sample_next_token(
 
     V = logits.numel()
     if top_k < 0 or top_k > V:
-        raise ValueError("top_k must be between 0 and vocab size")
+        raise ValueError(f"top_k must be between 0 and vocab size (got {top_k}, vocab={V})")
 
     if 0.0 < temperature < 1e-6:
         temperature = 1e-6

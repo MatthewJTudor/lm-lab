@@ -68,6 +68,12 @@ class SelfAttention(nn.Module):
         Returns (out, present_kv) if use_cache else (out, None).
         """
         B, T, C = x.shape
+
+        # Contract: KV-cache path only supports incremental decoding when cache is provided.
+        # If you want to support chunked decoding later, you must apply a causal mask over (past+new).
+        if past_kv is not None:
+            assert T == 1, "forward_kv with past_kv requires T==1 (incremental decode)."
+
         H = self.n_heads
         D = self.d_head
 
