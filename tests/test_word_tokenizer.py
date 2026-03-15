@@ -50,3 +50,23 @@ def test_build_tokenizer_word_mode() -> None:
     s = tok.decode(ids)
 
     assert s == "Alice was here."
+
+def test_word_tokenizer_keeps_contractions_together() -> None:
+    tok = WordTokenizer.build("don't I've we'll you're")
+    ids = tok.encode("don't I've we'll you're")
+    s = tok.decode(ids)
+    assert s == "don't I've we'll you're"
+
+
+def test_word_tokenizer_normalizes_curly_quotes() -> None:
+    tok = WordTokenizer.build("Alice said “don't do that.”")
+    ids = tok.encode("Alice said “don't do that.”")
+    s = tok.decode(ids)
+    assert s == 'Alice said "don\'t do that."'
+
+
+def test_word_tokenizer_attaches_punctuation_cleanly() -> None:
+    tok = WordTokenizer.build("Alice, hello.")
+    ids = tok.encode("Alice, hello.")
+    s = tok.decode(ids)
+    assert s == "Alice, hello."
