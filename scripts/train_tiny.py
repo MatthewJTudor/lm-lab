@@ -23,7 +23,7 @@ def main() -> None:
     )
 
     # Tokenizer
-    tok_cfg = TokenizerConfig(mode="word")
+    tok_cfg = TokenizerConfig(mode="bpe", bpe_vocab_size=64)
     tok = build_tokenizer(tok_cfg, text)
     tokens = tok.encode(text)
 

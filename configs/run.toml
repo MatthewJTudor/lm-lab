@@ -7,7 +7,8 @@ corpus = ""
 block_size = 128
 
 [tokenizer]
-mode = "word"
+mode = "bpe"
+bpe_vocab_size = 1024
 
 [model]
 d_model = 128

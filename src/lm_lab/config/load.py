@@ -38,6 +38,7 @@ class TrainConfig:
 @dataclass(frozen=True)
 class TokenizerConfig:
     mode: str = "char"
+    bpe_vocab_size: int = 512
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,7 @@ def load_run_config(path: str | Path) -> RunConfig:
     tok_raw = raw.get("tokenizer", {})
     tok_cfg = TokenizerConfig(
         mode=str(tok_raw.get("mode", "char")),
+        bpe_vocab_size=int(tok_raw.get("bpe_vocab_size", 512)),
     )
 
     gen_cfg = None
