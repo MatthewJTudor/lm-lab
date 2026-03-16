@@ -1,22 +1,53 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Iterable
 
 
-def _utf8_bytes(text: str) -> list[bytes]:
-    return [bytes([b]) for b in text.encode("utf-8")]
+# Simple GPT-like chunking:
+# - words optionally prefixed by spaces
+# - numbers optionally prefixed by spaces
+# - punctuation optionally prefixed by spaces
+# - newline runs
+# - remaining whitespace runs
+_CHUNK_RE = re.compile(
+    r"""
+    \n+                             |   # newline runs
+    [ ]+[^\W\d_]+                  |   # space-prefixed unicode words
+    [^\W\d_]+                      |   # unicode words at start
+    [ ]+\d+                        |   # space-prefixed numbers
+    \d+                            |   # numbers at start
+    [ ]+[^\w\s]+                   |   # space-prefixed punctuation/symbols
+    [^\w\s]+                       |   # punctuation/symbols at start
+    [ ]+                               # leftover spaces
+    """,
+    re.VERBOSE | re.UNICODE,
+)
 
 
-def _get_pair_counts(tokens: list[bytes]) -> dict[tuple[bytes, bytes], int]:
+def _chunk_text(text: str) -> list[str]:
+    return _CHUNK_RE.findall(text)
+
+
+def _chunk_to_byte_tokens(chunk: str) -> list[bytes]:
+    return [bytes([b]) for b in chunk.encode("utf-8")]
+
+
+def _chunk_text_to_tokens(text: str) -> list[list[bytes]]:
+    return [_chunk_to_byte_tokens(chunk) for chunk in _chunk_text(text)]
+
+
+def _get_pair_counts(chunks: list[list[bytes]]) -> dict[tuple[bytes, bytes], int]:
     counts: dict[tuple[bytes, bytes], int] = {}
-    for i in range(len(tokens) - 1):
-        pair = (tokens[i], tokens[i + 1])
-        counts[pair] = counts.get(pair, 0) + 1
+    for tokens in chunks:
+        for i in range(len(tokens) - 1):
+            pair = (tokens[i], tokens[i + 1])
+            counts[pair] = counts.get(pair, 0) + 1
     return counts
 
 
-def _merge_pair(tokens: list[bytes], pair: tuple[bytes, bytes]) -> list[bytes]:
+def _merge_pair_in_chunk(tokens: list[bytes], pair: tuple[bytes, bytes]) -> list[bytes]:
     merged: list[bytes] = []
     i = 0
     while i < len(tokens):
@@ -27,6 +58,13 @@ def _merge_pair(tokens: list[bytes], pair: tuple[bytes, bytes]) -> list[bytes]:
             merged.append(tokens[i])
             i += 1
     return merged
+
+
+def _merge_pair_in_chunks(
+    chunks: list[list[bytes]],
+    pair: tuple[bytes, bytes],
+) -> list[list[bytes]]:
+    return [_merge_pair_in_chunk(tokens, pair) for tokens in chunks]
 
 
 @dataclass(frozen=True)
@@ -42,12 +80,16 @@ class BPETokenizer:
         if vocab_size < 2:
             raise ValueError("vocab_size must be >= 2")
 
-        tokens = _utf8_bytes(text)
-        vocab: set[bytes] = set(tokens)
+        chunks = _chunk_text_to_tokens(text)
+        vocab: set[bytes] = set()
+
+        for tokens in chunks:
+            vocab.update(tokens)
+
         merges: list[tuple[bytes, bytes]] = []
 
         while len(vocab) < vocab_size:
-            pair_counts = _get_pair_counts(tokens)
+            pair_counts = _get_pair_counts(chunks)
             if not pair_counts:
                 break
 
@@ -60,7 +102,7 @@ class BPETokenizer:
             if best_count < 2:
                 break
 
-            tokens = _merge_pair(tokens, best_pair)
+            chunks = _merge_pair_in_chunks(chunks, best_pair)
             merged_tok = best_pair[0] + best_pair[1]
 
             vocab.add(merged_tok)
@@ -83,12 +125,16 @@ class BPETokenizer:
         return len(self.stoi)
 
     def encode(self, s: str) -> list[int]:
-        tokens = _utf8_bytes(s)
+        chunks = _chunk_text_to_tokens(s)
 
         for pair in self.merges:
-            tokens = _merge_pair(tokens, pair)
+            chunks = _merge_pair_in_chunks(chunks, pair)
 
-        return [self.stoi[tok] for tok in tokens]
+        flat_tokens: list[bytes] = []
+        for tokens in chunks:
+            flat_tokens.extend(tokens)
+
+        return [self.stoi[tok] for tok in flat_tokens]
 
     def decode(self, ids: Iterable[int]) -> str:
         chunks: list[bytes] = []

@@ -49,3 +49,22 @@ def test_bpe_no_empty_encoding_for_nonempty_text() -> None:
 
     ids = tok.encode(text)
     assert len(ids) > 0
+
+def test_bpe_preserves_space_prefixed_chunks_roundtrip() -> None:
+    text = "Alice said hello."
+    tok = BPETokenizer.build(text, vocab_size=64)
+
+    ids = tok.encode(text)
+    s = tok.decode(ids)
+
+    assert s == text
+
+
+def test_bpe_roundtrip_with_newlines_and_punctuation() -> None:
+    text = 'Alice said:\n"Hello!"\n'
+    tok = BPETokenizer.build(text, vocab_size=128)
+
+    ids = tok.encode(text)
+    s = tok.decode(ids)
+
+    assert s == text
