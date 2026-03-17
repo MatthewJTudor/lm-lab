@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
-
 # Simple GPT-like chunking:
 # - words optionally prefixed by spaces
 # - numbers optionally prefixed by spaces
@@ -26,31 +25,81 @@ _CHUNK_RE = re.compile(
     re.VERBOSE | re.UNICODE,
 )
 
+TokenSymbol = bytes | str
+
+def bytes_to_unicode() -> dict[int, str]:
+    """
+    Reversible byte -> unicode mapping in the style of GPT-2.
+
+    Maps each byte value 0..255 to a unique unicode character so that:
+    - every byte is representable as a single unicode symbol
+    - the mapping is reversible
+    - common visible characters stay readable where possible
+    """
+    bs = (
+        list(range(ord("!"), ord("~") + 1)) +
+        list(range(ord("¡"), ord("¬") + 1)) +
+        list(range(ord("®"), ord("ÿ") + 1))
+    )
+
+    cs = bs[:]
+    n = 0
+
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+
+    return {b: chr(c) for b, c in zip(bs, cs)}
+
+def unicode_to_bytes() -> dict[str, int]:
+    """
+    Reverse mapping for bytes_to_unicode().
+    """
+    enc = bytes_to_unicode()
+    return {ch: b for b, ch in enc.items()}
 
 def _chunk_text(text: str) -> list[str]:
     return _CHUNK_RE.findall(text)
 
-
 def _chunk_to_byte_tokens(chunk: str) -> list[bytes]:
     return [bytes([b]) for b in chunk.encode("utf-8")]
-
 
 def _chunk_text_to_tokens(text: str) -> list[list[bytes]]:
     return [_chunk_to_byte_tokens(chunk) for chunk in _chunk_text(text)]
 
+def _chunk_to_mapped_tokens(chunk: str) -> list[str]:
+    """
+    Convert a text chunk into GPT-style mapped unicode symbols,
+    one symbol per UTF-8 byte.
+    """
+    byte_encoder = bytes_to_unicode()
+    return [byte_encoder[b] for b in chunk.encode("utf-8")]
 
-def _get_pair_counts(chunks: list[list[bytes]]) -> dict[tuple[bytes, bytes], int]:
-    counts: dict[tuple[bytes, bytes], int] = {}
+
+def _chunk_text_to_mapped_tokens(text: str) -> list[list[str]]:
+    return [_chunk_to_mapped_tokens(chunk) for chunk in _chunk_text(text)]
+
+def _get_pair_counts(
+    chunks: list[list[TokenSymbol]],
+) -> dict[tuple[TokenSymbol, TokenSymbol], int]:
+    counts: dict[tuple[TokenSymbol, TokenSymbol], int] = {}
+
     for tokens in chunks:
         for i in range(len(tokens) - 1):
             pair = (tokens[i], tokens[i + 1])
             counts[pair] = counts.get(pair, 0) + 1
+
     return counts
 
-
-def _merge_pair_in_chunk(tokens: list[bytes], pair: tuple[bytes, bytes]) -> list[bytes]:
-    merged: list[bytes] = []
+def _merge_pair_in_chunk(
+    tokens: list[TokenSymbol],
+    pair: tuple[TokenSymbol, TokenSymbol],
+) -> list[TokenSymbol]:
+    merged: list[TokenSymbol] = []
     i = 0
+
     while i < len(tokens):
         if i < len(tokens) - 1 and (tokens[i], tokens[i + 1]) == pair:
             merged.append(tokens[i] + tokens[i + 1])
@@ -58,13 +107,13 @@ def _merge_pair_in_chunk(tokens: list[bytes], pair: tuple[bytes, bytes]) -> list
         else:
             merged.append(tokens[i])
             i += 1
+
     return merged
 
-
 def _merge_pair_in_chunks(
-    chunks: list[list[bytes]],
-    pair: tuple[bytes, bytes],
-) -> list[list[bytes]]:
+    chunks: list[list[TokenSymbol]],
+    pair: tuple[TokenSymbol, TokenSymbol],
+) -> list[list[TokenSymbol]]:
     return [_merge_pair_in_chunk(tokens, pair) for tokens in chunks]
 
 def inspect_chunks(text: str) -> list[str]:
