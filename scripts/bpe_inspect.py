@@ -3,12 +3,28 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from lm_lab.tokenization.bpe import BPETokenizer, inspect_chunks
+from lm_lab.tokenization.bpe import (
+    BPETokenizer,
+    inspect_chunks,
+    unicode_to_bytes,
+)
 
 
-def _safe_text(b: bytes) -> str:
-    decoded = b.decode("utf-8", errors="replace")
-    return f"{decoded!r} [{b!r}]"
+def _safe_text(token: str) -> str:
+    """
+    Display a mapped-symbol token as:
+    - the mapped token repr
+    - the reconstructed raw bytes repr
+    - the UTF-8 decoded text if valid
+    """
+    byte_decoder = unicode_to_bytes()
+    if isinstance(token, bytes):
+        raw = token
+    else:
+        raw = bytes(byte_decoder[ch] for ch in token)
+
+    decoded = raw.decode("utf-8", errors="replace")
+    return f"{decoded!r} [{raw!r}]"
 
 
 def main() -> None:
@@ -62,8 +78,8 @@ def main() -> None:
     vocab_lengths = tok.inspect_vocab_token_lengths()
     vocab_lengths.sort(key=lambda x: (-x[1], x[0]))
 
-    for tok_bytes, n in vocab_lengths[: args.top_n]:
-        print(f"len={n:>2} | {_safe_text(tok_bytes)}")
+    for tok_str, n in vocab_lengths[: args.top_n]:
+        print(f"len={n:>2} | {_safe_text(tok_str)}")
 
 
 if __name__ == "__main__":

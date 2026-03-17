@@ -63,12 +63,6 @@ def unicode_to_bytes() -> dict[str, int]:
 def _chunk_text(text: str) -> list[str]:
     return _CHUNK_RE.findall(text)
 
-def _chunk_to_byte_tokens(chunk: str) -> list[bytes]:
-    return [bytes([b]) for b in chunk.encode("utf-8")]
-
-def _chunk_text_to_tokens(text: str) -> list[list[bytes]]:
-    return [_chunk_to_byte_tokens(chunk) for chunk in _chunk_text(text)]
-
 def _chunk_to_mapped_tokens(chunk: str) -> list[str]:
     """
     Convert a text chunk into GPT-style mapped unicode symbols,
@@ -122,36 +116,36 @@ def inspect_chunks(text: str) -> list[str]:
 @dataclass(frozen=True)
 class MergeStat:
     rank: int
-    left: bytes
-    right: bytes
-    merged: bytes
+    left: str
+    right: str
+    merged: str
 
 @dataclass(frozen=True)
 class TokenStat:
-    token: bytes
+    token: str
     count: int
     byte_length: int
 
 @dataclass(frozen=True)
 class BPETokenizer:
-    stoi: dict[bytes, int]
-    itos: dict[int, bytes]
-    merges: list[tuple[bytes, bytes]]
-    bos_token: bytes = b"<bos>"
-    eos_token: bytes = b"<eos>"
+    stoi: dict[str, int]
+    itos: dict[int, str]
+    merges: list[tuple[str, str]]
+    bos_token: str = "<bos>"
+    eos_token: str = "<eos>"
 
     @classmethod
     def build(cls, text: str, vocab_size: int = 512) -> "BPETokenizer":
         if vocab_size < 2:
             raise ValueError("vocab_size must be >= 2")
 
-        chunks = _chunk_text_to_tokens(text)
-        vocab: set[bytes] = set()
+        chunks = _chunk_text_to_mapped_tokens(text)
+        vocab: set[str] = set()
 
         for tokens in chunks:
             vocab.update(tokens)
 
-        merges: list[tuple[bytes, bytes]] = []
+        merges: list[tuple[str, str]] = []
 
         while len(vocab) < vocab_size:
             pair_counts = _get_pair_counts(chunks)
@@ -190,27 +184,28 @@ class BPETokenizer:
         return len(self.stoi)
 
     def encode(self, s: str) -> list[int]:
-        chunks = _chunk_text_to_tokens(s)
+        chunks = _chunk_text_to_mapped_tokens(s)
 
         for pair in self.merges:
             chunks = _merge_pair_in_chunks(chunks, pair)
 
-        flat_tokens: list[bytes] = []
+        flat_tokens: list[str] = []
         for tokens in chunks:
             flat_tokens.extend(tokens)
 
         return [self.stoi[tok] for tok in flat_tokens]
 
     def decode(self, ids: Iterable[int]) -> str:
-        chunks: list[bytes] = []
+        byte_decoder = unicode_to_bytes()
+        symbols: list[str] = []
 
         for idx in ids:
             tok = self.itos[int(idx)]
             if tok in {self.bos_token, self.eos_token}:
                 continue
-            chunks.append(tok)
+            symbols.append(tok)
 
-        data = b"".join(chunks)
+        data = bytes(byte_decoder[ch] for tok in symbols for ch in tok)
         return data.decode("utf-8", errors="replace")
 
     def inspect_merges(self, top_n: int = 20) -> list[MergeStat]:
@@ -248,8 +243,8 @@ class BPETokenizer:
             )
         return stats
 
-    def inspect_vocab_token_lengths(self) -> list[tuple[bytes, int]]:
-        toks = []
+    def inspect_vocab_token_lengths(self) -> list[tuple[str, int]]:
+        toks: list[tuple[str, int]] = []
         for tok_id in sorted(self.itos):
             tok = self.itos[tok_id]
             if tok in {self.bos_token, self.eos_token}:

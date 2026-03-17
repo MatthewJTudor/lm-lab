@@ -128,9 +128,6 @@ def test_bpe_build_rejects_small_vocab_size() -> None:
     with pytest.raises(ValueError):
         BPETokenizer.build("hello world", vocab_size=1)
 
-from lm_lab.tokenization.bpe import bytes_to_unicode, unicode_to_bytes
-
-
 def test_bytes_to_unicode_covers_all_bytes() -> None:
     enc = bytes_to_unicode()
 
