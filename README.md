@@ -1,124 +1,304 @@
-# UNDER CONSTRUCTION
 # LM-Lab
 
-A minimal, deterministic GPT-style Transformer language model implemented from first principles in PyTorch.
+A minimal, deterministic GPT-style Transformer language model built from first principles in PyTorch.
 
-This project focuses on mechanical clarity, architectural correctness, and reproducible training behavior. It is intentionally reductionist: components are implemented incrementally and validated with explicit invariants and tests.
+This project focuses on **mechanical clarity**, **reproducibility**, and **architectural correctness**. Every component is implemented incrementally, validated with explicit invariants, and kept strictly separate from experimental logic.
 
-The goal is to understand how modern transformer language models work internally while maintaining a clean separation between the core model and future experimental frameworks.
+It serves as both:
 
----
-
-## Design Philosophy
-
-- **Reductionist build order** — Each component is introduced independently and validated before integration.
+- a **clean reference implementation** of a transformer LM
     
-- **Deterministic baseline** — CPU training with controlled seeds for reproducibility.
-    
-- **Explicit invariants** — Causality, positional correctness, and shape contracts are enforced via tests.
-    
-- **Clear architectural boundaries** — The language model core contains no experimental or orchestration logic.
-    
-- **Test-driven hardening** — New features are accompanied by invariants and smoke tests.
+- a **stable foundation** for advanced experimentation (hooks, capture systems, ARF)
     
 
 ---
 
-## Implemented Features
+## Why This Project Exists
 
-- Token embedding layer
+Most transformer repos optimize for scale or convenience.
+
+This one optimizes for:
+
+- **understanding** (every component is explicit)
     
-- Learned positional embeddings
+- **control** (deterministic behavior)
     
-- Sinusoidal positional encodings (Vaswani et al., 2017)
+- **verification** (test-backed invariants)
+    
+
+If something works, you should be able to explain _why_.
+
+---
+
+## Design Principles
+
+- **Reductionist construction**  
+    Build → validate → integrate
+    
+- **Deterministic by default**  
+    Reproducible runs across seeds, configs, and environments
+    
+- **Explicit invariants**  
+    Causality, KV-cache correctness, and positional behavior are enforced
+    
+- **Strict separation of concerns**  
+    Core LM ≠ experimentation layer
+    
+- **Test-first hardening**  
+    Features are only complete when proven
+    
+
+---
+
+## Features
+
+### Transformer Core
+
+- Token embeddings
+    
+- Learned + sinusoidal positional encodings
     
 - Multi-head causal self-attention
     
+- KV-cache (incremental decoding)
+    
 - Pre-LN transformer blocks
     
-- Feedforward MLP (GELU/ReLU)
+- Feedforward MLP (GELU / ReLU)
     
-- Optional dropout
+- Residual connections + LayerNorm
     
-- Weight tying (embedding ↔ output projection)
+- Weight tying (optional)
     
-- Deterministic full-batch training loop
+
+### Generation
+
+- Greedy decoding
     
-- Eval-mode loss snapshot logging
+- Temperature scaling
     
-- 29 pytest-based correctness tests
+- Top-k sampling
     
+- Top-p (nucleus) sampling
+    
+
+### Tokenization
+
+- Character tokenizer (deterministic baseline)
+    
+- Word tokenizer (regex-based)
+    
+- Byte Pair Encoding (BPE)
+    
+
+### Training System
+
+- Cross-entropy objective
+    
+- AdamW optimizer
+    
+- Config-driven runs (TOML → dataclasses)
+    
+- Deterministic batching
+    
+- Eval loss snapshot logging
+    
+- Checkpoint + config persistence
+    
+
+### Reproducibility
+
+- Global seed control (Python / NumPy / Torch)
+    
+- Deterministic dataset construction
+    
+- Fully reproducible runs
+    
+
+### Testing
+
+- **54 pytest tests**
+    
+    - attention correctness
+        
+    - KV-cache equivalence
+        
+    - positional invariants
+        
+    - tokenizer validation
+        
+    - sampling correctness
+        
+    - training smoke tests
+        
 
 ---
 
 ## Repository Structure
 
 ```
-lm_lab/  
-core/ # Transformer components  
-config/ # Structured config loading (TOML)  
-data/ # Sequence dataset utilities  
-tokenization/ # Character tokenizer  
-utils/ # Seeding & reproducibility  
-scripts/  
-train.py # Minimal training entrypoint  
-tests/ # Invariant and smoke tests
+lm-lab/
+├── configs/
+├── data/
+├── docs/
+├── runs/
+├── scripts/
+├── src/lm_lab/
+│   ├── core/
+│   ├── tokenization/
+│   ├── data/
+│   ├── inference/
+│   ├── config/
+│   ├── utils/
+│   ├── capture/   # reserved
+│   └── hooks/     # reserved
+├── tests/
+└── requirements.txt
 ```
 
-## Running
+Full structure: `docs/repo_structure.md`
 
-Install dependencies (Python 3.10+ recommended):
+---
 
-```
+## Quick Start
+
+### Install
+
+```Bash
 pip install -r requirements.txt
 ```
 
-Run tests:
+**Run tests**
 
-```
+```Bash
 pytest -q
 ```
 
-Train the model:
+**Train**
 
+```Bash
+python scripts/train.py --config configs/run.toml --save
 ```
-python scripts/train.py --config configs/run.toml
+
+### Generate
+
+```python 
+scripts/generate.py \  
+  --config configs/run.toml \  
+  --prompt "Alice " \  
+  --temperature 0.7 \  
+  --top_p 0.9
 ```
+
+---
+
+## Configuration
+
+All runs are defined via `configs/run.toml`.
+
+Example:
+
+```TOML
+[model]  
+d_model = 128  
+n_layers = 4  
+n_heads = 4  
+max_seq_len = 128  
+  
+[tokenizer]  
+mode = "bpe"  
+  
+[train]  
+steps = 4000  
+lr = 1e-3  
+batch_size = 64
+```
+
+Configs are parsed into typed dataclasses for safety and clarity.
+
+---
 
 ## Determinism & Validation
 
-The training loop uses:
+Determinism is enforced as a **system property**, not a best effort:
 
-- Explicit seeding
+- Fixed RNG seeds
     
-- Controlled evaluation snapshots
+- Deterministic data slicing
     
-- Causal masking tests
-    
-- Positional embedding invariants
-    
-- Smoke tests verifying loss decreases in both learned and sinusoidal modes
+- No hidden randomness
     
 
-The model is validated not just for execution but for structural correctness.
+Correctness is verified structurally:
+
+- causal masking
+    
+- KV-cache vs full forward equivalence
+    
+- positional encoding invariants
+    
+- sampling behavior validation
+    
+- loss convergence checks
+    
 
 ---
 
 ## Current Status
 
-Core GPT-style architecture is stable.
+**Stable baseline complete**
 
-Next phase:
-
-- Autoregressive generation (greedy + sampling)
+- Transformer core validated
     
-- KV-cache incremental decoding
+- KV-cache verified
     
-- Extended sampling controls
+- Sampling implemented (top-k, top-p)
+    
+- Tokenization system complete
+    
+- Full test suite passing (54 tests)
     
 
 ---
 
-## Educational Purpose
+## Roadmap
 
-This repository is intended as a learning and engineering exercise in building transformer language models from first principles while maintaining production-quality discipline.
+### Near-term
+
+- Hook system (non-intrusive forward observation)
+    
+- Activation capture pipeline
+    
+- Structured snapshot storage
+    
+
+### Experimental (separate layer)
+
+- Internal tensor diagnostics
+    
+- Resonance-based metrics (ARF)
+    
+- Model behavior analysis tooling
+    
+
+---
+
+## Educational Value
+
+This project is designed to make transformer systems:
+
+- **inspectable**
+    
+- **predictable**
+    
+- **understandable**
+    
+
+It prioritizes **clarity over abstraction** and **correctness over convenience**.
+
+---
+
+## Guiding Principle
+
+> If a system cannot be explained, it cannot be trusted.  
+> If it cannot be reproduced, it cannot be validated.
