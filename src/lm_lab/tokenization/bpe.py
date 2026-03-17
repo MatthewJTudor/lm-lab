@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import re
 from typing import Iterable
@@ -66,6 +67,21 @@ def _merge_pair_in_chunks(
 ) -> list[list[bytes]]:
     return [_merge_pair_in_chunk(tokens, pair) for tokens in chunks]
 
+def inspect_chunks(text: str) -> list[str]:
+    return _chunk_text(text)
+
+@dataclass(frozen=True)
+class MergeStat:
+    rank: int
+    left: bytes
+    right: bytes
+    merged: bytes
+
+@dataclass(frozen=True)
+class TokenStat:
+    token: bytes
+    count: int
+    byte_length: int
 
 @dataclass(frozen=True)
 class BPETokenizer:
@@ -147,3 +163,47 @@ class BPETokenizer:
 
         data = b"".join(chunks)
         return data.decode("utf-8", errors="replace")
+
+    def inspect_merges(self, top_n: int = 20) -> list[MergeStat]:
+        if top_n < 0:
+            raise ValueError("top_n must be >= 0")
+
+        out: list[MergeStat] = []
+        for i, (left, right) in enumerate(self.merges[:top_n]):
+            out.append(
+                MergeStat(
+                    rank=i,
+                    left=left,
+                    right=right,
+                    merged=left + right,
+                )
+            )
+        return out
+
+    def inspect_token_frequencies(self, text: str, top_n: int = 20) -> list[TokenStat]:
+        if top_n < 0:
+            raise ValueError("top_n must be >= 0")
+
+        ids = self.encode(text)
+        counts = Counter(ids)
+
+        stats: list[TokenStat] = []
+        for tok_id, count in counts.most_common(top_n):
+            tok = self.itos[tok_id]
+            stats.append(
+                TokenStat(
+                    token=tok,
+                    count=count,
+                    byte_length=len(tok),
+                )
+            )
+        return stats
+
+    def inspect_vocab_token_lengths(self) -> list[tuple[bytes, int]]:
+        toks = []
+        for tok_id in sorted(self.itos):
+            tok = self.itos[tok_id]
+            if tok in {self.bos_token, self.eos_token}:
+                continue
+            toks.append((tok, len(tok)))
+        return toks
