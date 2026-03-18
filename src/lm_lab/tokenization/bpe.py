@@ -53,12 +53,14 @@ def bytes_to_unicode() -> dict[int, str]:
 
     return {b: chr(c) for b, c in zip(bs, cs)}
 
+_BYTE_ENCODER = bytes_to_unicode()
+_BYTE_DECODER = {ch: b for b, ch in _BYTE_ENCODER.items()}
+
 def unicode_to_bytes() -> dict[str, int]:
     """
     Reverse mapping for bytes_to_unicode().
     """
-    enc = bytes_to_unicode()
-    return {ch: b for b, ch in enc.items()}
+    return _BYTE_DECODER.copy()
 
 def _chunk_text(text: str) -> list[str]:
     return _CHUNK_RE.findall(text)
@@ -68,9 +70,7 @@ def _chunk_to_mapped_tokens(chunk: str) -> list[str]:
     Convert a text chunk into GPT-style mapped unicode symbols,
     one symbol per UTF-8 byte.
     """
-    byte_encoder = bytes_to_unicode()
-    return [byte_encoder[b] for b in chunk.encode("utf-8")]
-
+    return [_BYTE_ENCODER[b] for b in chunk.encode("utf-8")]
 
 def _chunk_text_to_mapped_tokens(text: str) -> list[list[str]]:
     return [_chunk_to_mapped_tokens(chunk) for chunk in _chunk_text(text)]
@@ -196,7 +196,6 @@ class BPETokenizer:
         return [self.stoi[tok] for tok in flat_tokens]
 
     def decode(self, ids: Iterable[int]) -> str:
-        byte_decoder = unicode_to_bytes()
         symbols: list[str] = []
 
         for idx in ids:
@@ -205,7 +204,7 @@ class BPETokenizer:
                 continue
             symbols.append(tok)
 
-        data = bytes(byte_decoder[ch] for tok in symbols for ch in tok)
+        data = bytes(_BYTE_DECODER[ch] for tok in symbols for ch in tok)
         return data.decode("utf-8", errors="replace")
 
     def inspect_merges(self, top_n: int = 20) -> list[MergeStat]:
