@@ -6,10 +6,13 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
+from lm_lab.capture.events import CaptureMetadata
 from lm_lab.core.embedding import TokenEmbedding, EmbeddingConfig
 from lm_lab.core.position import PositionEmbedding, PositionEmbeddingConfig
 from lm_lab.core.block import TransformerBlock, TransformerBlockConfig
 from lm_lab.core.attention import KVCache
+from lm_lab.hooks.manager import HookManager
+
 
 @dataclass(frozen=True)
 class TransformerLMConfig:
@@ -38,14 +41,20 @@ class TransformerLMConfig:
     # --- embeddings ---
     tie_embeddings: bool = True
 
+
 class TransformerLM(nn.Module):
     """
     Minimalistic GPT-style language model.
     """
 
-    def __init__(self, cfg: TransformerLMConfig) -> None:
+    def __init__(
+        self,
+        cfg: TransformerLMConfig,
+        hook_manager: HookManager | None = None,
+    ) -> None:
         super().__init__()
         self.cfg = cfg
+        self.hook_manager = hook_manager
 
         self.token_emb = TokenEmbedding(
             EmbeddingConfig(vocab_size=self.cfg.vocab_size, d_model=self.cfg.d_model)
@@ -62,19 +71,22 @@ class TransformerLM(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    TransformerBlockConfig(d_model=cfg.d_model,
-                                           n_heads=cfg.n_heads,
-                                           attn_bias=cfg.attn_bias,
-                                           mlp_hidden_mult=cfg.mlp_hidden_mult,
-                                           activation=cfg.activation,
-                                           )
+                    TransformerBlockConfig(
+                        d_model=cfg.d_model,
+                        n_heads=cfg.n_heads,
+                        attn_bias=cfg.attn_bias,
+                        mlp_hidden_mult=cfg.mlp_hidden_mult,
+                        activation=cfg.activation,
+                        dropout=cfg.dropout,
+                    ),
+                    block_idx=i,
+                    hook_manager=self.hook_manager,
                 )
-                for _ in range(cfg.n_layers)
+                for i in range(cfg.n_layers)
             ]
         )
 
         self.ln_f = nn.LayerNorm(cfg.d_model)
-
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
 
         if cfg.tie_embeddings:
@@ -82,12 +94,10 @@ class TransformerLM(nn.Module):
 
         self.drop = nn.Dropout(cfg.dropout)
 
-
-
     def _crop_past_kvs(
-            self,
-            past_kvs: list[KVCache | None],
-            keep: int,
+        self,
+        past_kvs: list[KVCache | None],
+        keep: int,
     ) -> list[KVCache | None]:
         if keep <= 0:
             return [None] * len(past_kvs)
@@ -97,7 +107,6 @@ class TransformerLM(nn.Module):
             if kv is None:
                 out.append(None)
                 continue
-            # kv.k: (B,H,T,D)
             if kv.k.size(2) > keep:
                 out.append(
                     KVCache(
@@ -110,10 +119,11 @@ class TransformerLM(nn.Module):
         return out
 
     def forward_kv(
-            self,
-            idx: torch.Tensor,  # (B,T)
-            past_kvs: list[KVCache | None] | None = None,
-            use_cache: bool = True,
+        self,
+        idx: torch.Tensor,  # (B,T)
+        past_kvs: list[KVCache | None] | None = None,
+        use_cache: bool = True,
+        metadata: CaptureMetadata | None = None,
     ) -> tuple[torch.Tensor, list[KVCache | None]]:
         """
         Cache-aware forward for generation.
@@ -126,7 +136,6 @@ class TransformerLM(nn.Module):
             raise ValueError("Sequence length exceeds maximum sequence length.")
 
         if past_kvs is not None:
-            # We are about to append T new tokens; keep only last (max_seq_len - T)
             keep = self.cfg.max_seq_len - T
             if keep < 0:
                 raise ValueError("T exceeds max_seq_len in forward_kv incremental path.")
@@ -134,12 +143,8 @@ class TransformerLM(nn.Module):
 
         tok = self.token_emb(idx)
 
-        # position offset handled below (see PositionEmbedding patch)
-        # For warmup (past_kvs is None): offset=0
-        # For incremental (past_kvs not None, recommended T=1): offset = cached_len (or total_len - T)
         pos_offset = 0
         if past_kvs is not None and past_kvs[0] is not None:
-            # cached length so far (per layer cache length should match)
             pos_offset = past_kvs[0].k.size(2)
 
         pos = self.pos_emb(idx, pos_offset=pos_offset)
@@ -152,14 +157,23 @@ class TransformerLM(nn.Module):
 
         new_kvs: list[KVCache | None] = []
         for i, block in enumerate(self.blocks):
-            x, present = block.forward_kv(x, past_kv=past_kvs[i], use_cache=use_cache)
+            x, present = block.forward_kv(
+                x,
+                past_kv=past_kvs[i],
+                use_cache=use_cache,
+                metadata=metadata,
+            )
             new_kvs.append(present)
 
         x = self.ln_f(x)
         logits = self.head(x)
         return logits, new_kvs
 
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        idx: torch.Tensor,
+        metadata: CaptureMetadata | None = None,
+    ) -> torch.Tensor:
         """
         idx: (B, T) integer tokens.
         returns: (B, T, vocab_size) logits
@@ -175,11 +189,8 @@ class TransformerLM(nn.Module):
         x = self.drop(tok + pos)
 
         for block in self.blocks:
-            x = block(x)
+            x = block(x, metadata=metadata)
 
         x = self.ln_f(x)
-
         logits = self.head(x)
-
         return logits
-

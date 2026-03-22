@@ -6,8 +6,11 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
+from lm_lab.capture.events import CaptureMetadata
 from lm_lab.core.attention import SelfAttention, AttentionConfig
 from lm_lab.core.attention import KVCache
+from lm_lab.hooks.manager import HookManager
+
 
 @dataclass(frozen=True)
 class TransformerBlockConfig:
@@ -21,6 +24,7 @@ class TransformerBlockConfig:
 
     dropout: float = 0.0
 
+
 class TransformerBlock(nn.Module):
     """
     Minimal transformer block (Pre-LN):
@@ -28,9 +32,16 @@ class TransformerBlock(nn.Module):
         x -> x + MLP(LN2(x))
     """
 
-    def __init__(self, cfg: TransformerBlockConfig) -> None:
+    def __init__(
+        self,
+        cfg: TransformerBlockConfig,
+        block_idx: int = 0,
+        hook_manager: HookManager | None = None,
+    ) -> None:
         super().__init__()
         self.cfg = cfg
+        self.block_idx = block_idx
+        self.hook_manager = hook_manager
 
         self.ln1 = nn.LayerNorm(cfg.d_model)
         self.attn = SelfAttention(
@@ -56,18 +67,55 @@ class TransformerBlock(nn.Module):
 
         self.drop = nn.Dropout(cfg.dropout)
 
-    def forward_kv(
+    def _tap(
             self,
-            x: torch.Tensor,
-            past_kv: KVCache | None = None,
-            use_cache: bool = False,
+            tap_name: str,
+            tensor: torch.Tensor,
+            metadata: CaptureMetadata | None,
+    ) -> None:
+        if self.hook_manager is None or metadata is None:
+            return
+
+        full_name = f"blocks.{self.block_idx}.{tap_name}"
+        tap_meta = CaptureMetadata(
+            run_id=metadata.run_id,
+            phase=metadata.phase,
+            step=metadata.step,
+            seed=metadata.seed,
+            layer=f"blocks.{self.block_idx}",
+            tap_name=tap_name,
+            dtype="",  # filled by HookManager.emit
+            device="",  # filled by HookManager.emit
+            timestamp_s=0.0,  # filled by HookManager.emit
+            sample_id=metadata.sample_id,
+            prompt_id=metadata.prompt_id,
+            regime_label=metadata.regime_label,
+            knob_name=metadata.knob_name,
+            knob_value=metadata.knob_value,
+        )
+        self.hook_manager.emit(full_name, tensor, tap_meta)
+
+    def forward_kv(
+        self,
+        x: torch.Tensor,
+        past_kv: KVCache | None = None,
+        use_cache: bool = False,
+        metadata: CaptureMetadata | None = None,
     ) -> tuple[torch.Tensor, KVCache | None]:
         attn_out, present = self.attn.forward_kv(self.ln1(x), past_kv=past_kv, use_cache=use_cache)
         x = x + attn_out
+        self._tap("post_attn_residual", x, metadata)
+
         x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
         return x, present
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        metadata: CaptureMetadata | None = None,
+    ) -> torch.Tensor:
         x = x + self.attn(self.ln1(x))
+        self._tap("post_attn_residual", x, metadata)
+
         x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
         return x
