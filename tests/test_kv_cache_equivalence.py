@@ -88,5 +88,5 @@ def test_kv_cache_requires_incremental_decode_when_past_present() -> None:
     # Illegal: feeding more than one token while also providing a past cache
     two_tokens = torch.tensor([[6, 7]], dtype=torch.long)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="forward_kv with past_kv requires T==1"):
         _ = model.forward_kv(two_tokens, past_kvs=past, use_cache=True)

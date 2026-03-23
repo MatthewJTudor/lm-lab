@@ -144,8 +144,7 @@ def main() -> None:
     # Encode the prompt into the model's token space.
     prompt_ids = tok.encode(args.prompt)
     if len(prompt_ids) == 0:
-        # Fallback so generation always has at least one starting token.
-        prompt_ids = [tok.stoi[tok.unk_token]]
+        raise ValueError("Prompt produced no tokens. Provide a non-empty prompt.")
 
     idx = torch.tensor(prompt_ids, dtype=torch.long).unsqueeze(0)  # (1, T)
 

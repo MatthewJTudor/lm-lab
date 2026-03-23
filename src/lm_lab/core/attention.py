@@ -115,8 +115,8 @@ class SelfAttention(nn.Module):
 
         # Current cache contract only supports incremental decode once history exists.
         # Chunked cached decoding would require masking over (past + new) positions.
-        if past_kv is not None:
-            assert T == 1, "forward_kv with past_kv requires T==1 (incremental decode)."
+        if past_kv is not None and T != 1:
+            raise ValueError("forward_kv with past_kv requires T==1 (incremental decode).")
 
         H = self.n_heads
         D = self.d_head

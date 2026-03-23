@@ -47,5 +47,5 @@ def grad_norm_total(model: nn.Module) -> float:
     total = 0.0
     for p in model.parameters():
         if p.grad is not None:
-            total += p.grad.data.norm(2).item() ** 2
+            total += p.grad.norm(2).item() ** 2
     return total ** 0.5

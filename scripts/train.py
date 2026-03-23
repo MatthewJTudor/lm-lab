@@ -24,31 +24,6 @@ from lm_lab.tokenization.build import build_tokenizer
 from lm_lab.utils.seed import seed_everything
 
 
-def build_full_batch(ds: SequenceDataset) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Materialize the full dataset as a single training batch.
-
-    Args:
-        ds: Sequence dataset providing (x, y) next-token windows.
-
-    Returns:
-        A tuple of:
-            - x batch of shape (B, T) with dtype long
-            - y batch of shape (B, T) with dtype long
-    """
-    x_list: list[np.ndarray] = []
-    y_list: list[np.ndarray] = []
-
-    for i in range(len(ds)):
-        x, y = ds[i]
-        x_list.append(x)
-        y_list.append(y)
-
-    x_batch = torch.from_numpy(np.stack(x_list)).long()
-    y_batch = torch.from_numpy(np.stack(y_list)).long()
-    return x_batch, y_batch
-
-
 def build_batch(ds: SequenceDataset, idxs: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Build a batch from a selected set of dataset indices.
@@ -296,7 +271,7 @@ def main() -> None:
             train_record = LMMetricRecord(
                 run_id=run_id,
                 phase="train",
-                step=step,
+                global_step=step,
                 seed=cfg.seed.seed,
                 tokenizer_mode=cfg.tokenizer.mode,
                 regime_label="baseline",
@@ -306,7 +281,7 @@ def main() -> None:
             eval_record = LMMetricRecord(
                 run_id=run_id,
                 phase="eval",
-                step=step,
+                global_step=step,
                 seed=cfg.seed.seed,
                 tokenizer_mode=cfg.tokenizer.mode,
                 regime_label="baseline",

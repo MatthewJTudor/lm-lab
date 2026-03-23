@@ -14,12 +14,13 @@ class SeedConfig:
         seed: Base seed value applied across Python, NumPy, and PyTorch.
         python_hash_seed: Whether to set ``PYTHONHASHSEED`` for stable hash-based
             iteration behavior across processes.
+        deterministic_torch: Whether to enable strict PyTorch deterministic
+            algorithms (may reduce performance).
     """
 
     seed: int = 1337
-    # Python hash randomization affects dict/set iteration order across processes.
-    # Setting PYTHONHASHSEED makes this stable.
     python_hash_seed: bool = True
+    deterministic_torch: bool = False
 
 
 def seed_everything(cfg: SeedConfig) -> None:
@@ -60,7 +61,7 @@ def seed_everything(cfg: SeedConfig) -> None:
 
         # Optional strict PyTorch determinism. This may reduce performance but
         # can improve reproducibility when supported by the selected operations.
-        if getattr(cfg, "deterministic_torch", False):
+        if cfg.deterministic_torch:
             torch.use_deterministic_algorithms(True)
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True

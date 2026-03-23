@@ -116,6 +116,7 @@ class TransformerLM(nn.Module):
                         attn_bias=cfg.attn_bias,
                         mlp_hidden_mult=cfg.mlp_hidden_mult,
                         activation=cfg.activation,
+                        layer_norm_eps=cfg.layer_norm_eps,
                         dropout=cfg.dropout,
                     ),
                     block_idx=i,
@@ -125,7 +126,7 @@ class TransformerLM(nn.Module):
             ]
         )
 
-        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.ln_f = nn.LayerNorm(cfg.d_model, eps=cfg.layer_norm_eps)
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
 
         if cfg.tie_embeddings:

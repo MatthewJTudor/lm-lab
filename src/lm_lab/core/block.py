@@ -23,6 +23,7 @@ class TransformerBlockConfig:
         attn_bias: Whether attention projection layers use bias terms.
         mlp_hidden_mult: Expansion factor for the MLP hidden dimension.
         activation: Nonlinearity used inside the MLP.
+        layer_norm_eps: Epsilon value used by the block layer norms.
         dropout: Dropout probability applied in attention and MLP paths.
     """
 
@@ -33,6 +34,7 @@ class TransformerBlockConfig:
     # --- MLP ---
     mlp_hidden_mult: int = 4
     activation: Literal["gelu", "relu"] = "gelu"
+    layer_norm_eps: float = 1e-5
 
     dropout: float = 0.0
 
@@ -66,7 +68,7 @@ class TransformerBlock(nn.Module):
         self.block_idx = block_idx
         self.hook_manager = hook_manager
 
-        self.ln1 = nn.LayerNorm(cfg.d_model)
+        self.ln1 = nn.LayerNorm(cfg.d_model, eps=cfg.layer_norm_eps)
         self.attn = SelfAttention(
             AttentionConfig(
                 d_model=cfg.d_model,
@@ -76,7 +78,7 @@ class TransformerBlock(nn.Module):
             )
         )
 
-        self.ln2 = nn.LayerNorm(cfg.d_model)
+        self.ln2 = nn.LayerNorm(cfg.d_model, eps=cfg.layer_norm_eps)
         d_ff = cfg.mlp_hidden_mult * cfg.d_model
         self.fc1 = nn.Linear(cfg.d_model, d_ff)
         self.fc2 = nn.Linear(d_ff, cfg.d_model)

@@ -132,7 +132,11 @@ class WordTokenizer:
         tokens: list[str] = []
 
         for idx in ids:
-            tok = self.itos[int(idx)]
+            idx = int(idx)
+            if idx not in self.itos:
+                raise ValueError(f"Token ID out of range: {idx}")
+
+            tok = self.itos[idx]
             if tok in specials:
                 continue
             tokens.append(tok)
