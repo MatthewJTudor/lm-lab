@@ -6,7 +6,7 @@ import time
 
 import torch
 
-from lm_lab.capture.events import CaptureEvent, CaptureMetadata
+from lm_lab.capture.events import CaptureContext, CaptureEvent, CaptureMetadata
 
 
 HookCallback = Callable[[CaptureEvent], None]
@@ -31,7 +31,7 @@ class HookManager:
     def clear(self) -> None:
         self._callbacks.clear()
 
-    def emit(self, name: str, tensor: torch.Tensor, metadata: CaptureMetadata) -> None:
+    def emit(self, name: str, tensor: torch.Tensor, context: CaptureContext) -> None:
         if not self.enabled:
             return
 
@@ -44,20 +44,21 @@ class HookManager:
             captured = captured.clone()
 
         event_meta = CaptureMetadata(
-            run_id=metadata.run_id,
-            phase=metadata.phase,
-            step=metadata.step,
-            seed=metadata.seed,
-            layer=metadata.layer,
-            tap_name=metadata.tap_name,
+            run_id=context.run_id,
+            phase=context.phase,
+            global_step=context.global_step,
+            decode_step=context.decode_step,
+            seed=context.seed,
+            layer=context.layer,
+            tap_name=context.tap_name,
             dtype=str(captured.dtype),
             device=str(captured.device),
             timestamp_s=time.time(),
-            sample_id=metadata.sample_id,
-            prompt_id=metadata.prompt_id,
-            regime_label=metadata.regime_label,
-            knob_name=metadata.knob_name,
-            knob_value=metadata.knob_value,
+            sample_id=context.sample_id,
+            prompt_id=context.prompt_id,
+            regime_label=context.regime_label,
+            knob_name=context.knob_name,
+            knob_value=context.knob_value,
         )
 
         event = CaptureEvent(

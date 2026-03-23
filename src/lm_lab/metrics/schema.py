@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
+
 @dataclass
 class LMMetricRecord:
     run_id: str | None = None
     phase: str = "train"
-    step: int = 0
+    global_step: int | None = None
+    decode_step: int | None = None
     seed: int = 0
     tokenizer_mode: str = ""
 
@@ -22,11 +24,21 @@ class LMMetricRecord:
     def to_dict(self) -> dict:
         return asdict(self)
 
-def format_metric_record(record: LMMetricRecord, metric_order: list[str] | None = None) -> str:
+
+def format_metric_record(
+    record: LMMetricRecord,
+    metric_order: list[str] | None = None,
+) -> str:
+    step_part = (
+        f"global_step={record.global_step}"
+        if record.global_step is not None
+        else f"decode_step={record.decode_step}"
+    )
+
     prefix = (
         f"run_id={record.run_id or 'none'} | "
         f"phase={record.phase} | "
-        f"step={record.step} | "
+        f"{step_part} | "
         f"seed={record.seed} | "
         f"tok={record.tokenizer_mode} | "
         f"regime={record.regime_label}"

@@ -6,7 +6,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
-from lm_lab.capture.events import CaptureMetadata
+from lm_lab.capture.events import CaptureContext
 from lm_lab.core.embedding import TokenEmbedding, EmbeddingConfig
 from lm_lab.core.position import PositionEmbedding, PositionEmbeddingConfig
 from lm_lab.core.block import TransformerBlock, TransformerBlockConfig
@@ -123,7 +123,7 @@ class TransformerLM(nn.Module):
         idx: torch.Tensor,  # (B,T)
         past_kvs: list[KVCache | None] | None = None,
         use_cache: bool = True,
-        metadata: CaptureMetadata | None = None,
+        context: CaptureContext | None = None,
     ) -> tuple[torch.Tensor, list[KVCache | None]]:
         """
         Cache-aware forward for generation.
@@ -161,7 +161,7 @@ class TransformerLM(nn.Module):
                 x,
                 past_kv=past_kvs[i],
                 use_cache=use_cache,
-                metadata=metadata,
+                context=context,
             )
             new_kvs.append(present)
 
@@ -172,7 +172,7 @@ class TransformerLM(nn.Module):
     def forward(
         self,
         idx: torch.Tensor,
-        metadata: CaptureMetadata | None = None,
+        context: CaptureContext | None = None,
     ) -> torch.Tensor:
         """
         idx: (B, T) integer tokens.
@@ -189,7 +189,7 @@ class TransformerLM(nn.Module):
         x = self.drop(tok + pos)
 
         for block in self.blocks:
-            x = block(x, metadata=metadata)
+            x = block(x, context=context)
 
         x = self.ln_f(x)
         logits = self.head(x)
