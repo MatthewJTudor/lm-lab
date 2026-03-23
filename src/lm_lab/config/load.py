@@ -12,6 +12,17 @@ from lm_lab.core.model import TransformerLMConfig
 
 @dataclass(frozen=True)
 class GenConfig:
+    """
+    Generation-time decoding configuration.
+
+    Attributes:
+        temperature: Sampling temperature. A value of 0.0 is treated as greedy decode.
+        top_k: Top-k truncation for next-token sampling.
+        top_p: Nucleus sampling threshold.
+        max_new_tokens: Maximum number of tokens to generate.
+        seed: RNG seed used for generation-time determinism.
+    """
+
     temperature: float = 1.0
     top_k: int = 0
     top_p: float = 1.0
@@ -21,6 +32,24 @@ class GenConfig:
 
 @dataclass(frozen=True)
 class TrainConfig:
+    """
+    Training loop configuration.
+
+    Attributes:
+        steps: Number of training steps.
+        lr: Optimizer learning rate.
+        log_every: Interval for training/evaluation logging.
+
+        optimizer: Optimizer name.
+        weight_decay: Weight decay applied by the optimizer.
+
+        batch_size: Batch size. A value of 0 selects full-batch training.
+        shuffle: Reserved training-order flag for future batching regimes.
+
+        grad_clip: Maximum gradient norm for clipping. A value of 0.0 disables clipping.
+        device: Device string used for training execution.
+    """
+
     steps: int
     lr: float
     log_every: int
@@ -37,12 +66,34 @@ class TrainConfig:
 
 @dataclass(frozen=True)
 class TokenizerConfig:
+    """
+    Tokenizer construction configuration.
+
+    Attributes:
+        mode: Tokenizer mode to build.
+        bpe_vocab_size: Target BPE vocabulary size when mode == "bpe".
+    """
+
     mode: str = "char"
     bpe_vocab_size: int = 512
 
 
 @dataclass(frozen=True)
 class RunConfig:
+    """
+    Fully resolved runtime configuration for a training/generation run.
+
+    Attributes:
+        seed: Global seeding configuration.
+        data_text: Resolved training corpus text.
+        data: Dataset/windowing configuration.
+        model: Transformer model configuration.
+        train: Training loop configuration.
+        tokenizer: Tokenizer construction configuration.
+        gen: Optional generation configuration.
+        data_text_path: Resolved corpus path when text was loaded from disk, else None.
+    """
+
     seed: SeedConfig
     data_text: str
     data: SequenceDatasetConfig
@@ -54,10 +105,29 @@ class RunConfig:
 
 
 def load_run_config(path: str | Path) -> RunConfig:
+    """
+    Load a TOML run configuration and resolve it into typed runtime dataclasses.
+
+    Resolution behavior:
+        - Parses the TOML file at ``path``.
+        - Resolves corpus text from either ``[data].corpus_path`` or ``[data].corpus``.
+        - Prefers corpus paths relative to the inferred repo root, with a fallback
+          to the config file directory.
+        - Leaves model vocab_size at 0 so it can be filled after tokenizer build.
+
+    Args:
+        path: Path to the TOML configuration file.
+
+    Returns:
+        A fully resolved RunConfig instance.
+
+    Raises:
+        ValueError: If no corpus source is provided.
+    """
     p = Path(path).resolve()
     cfg_dir = p.parent
 
-    # Heuristic: configs/ is one level under repo root
+    # Heuristic: configs/ is one level under repo root.
     repo_root = cfg_dir.parent
     raw = tomllib.loads(p.read_text(encoding="utf-8"))
 
@@ -70,17 +140,18 @@ def load_run_config(path: str | Path) -> RunConfig:
     corpus_inline = data_raw.get("corpus", "")
     if corpus_inline is None:
         corpus_inline = ""
-    corpus_inline = str(corpus_inline)  # DO NOT strip: preserve newlines
+    # Preserve inline newlines exactly as provided in the TOML.
+    corpus_inline = str(corpus_inline)
 
     if corpus_path:
         corpus_rel = Path(corpus_path)
         if corpus_rel.is_absolute():
             corpus_p = corpus_rel
         else:
-            # Prefer repo-root (matches your layout: <root>/data, <root>/configs)
+            # Prefer repo-root-relative paths to match the standard project layout.
             corpus_p = (repo_root / corpus_rel).resolve()
             if not corpus_p.exists():
-                # Fallback: relative to config directory
+                # Fallback: resolve relative to the config file directory.
                 corpus_p = (cfg_dir / corpus_rel).resolve()
 
         data_text = corpus_p.read_text(encoding="utf-8")
@@ -95,7 +166,7 @@ def load_run_config(path: str | Path) -> RunConfig:
 
     model_raw = raw["model"]
     model_cfg = TransformerLMConfig(
-        vocab_size=0,  # filled after tokenizer build
+        vocab_size=0,  # Filled after tokenizer build.
         max_seq_len=int(model_raw["max_seq_len"]),
         d_model=int(model_raw["d_model"]),
         n_layers=int(model_raw["n_layers"]),

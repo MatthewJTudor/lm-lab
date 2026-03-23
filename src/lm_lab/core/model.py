@@ -16,6 +16,30 @@ from lm_lab.hooks.manager import HookManager
 
 @dataclass(frozen=True)
 class TransformerLMConfig:
+    """
+    Configuration for the TransformerLM model.
+
+    Attributes:
+        vocab_size: Vocabulary size used by the token embedding and output head.
+        max_seq_len: Maximum supported sequence length.
+        d_model: Residual stream width.
+        n_layers: Number of transformer blocks.
+        pos_mode: Positional embedding mode.
+
+        n_heads: Number of attention heads per block.
+        attn_bias: Whether attention projection layers use bias terms.
+        attn_impl: Reserved slot for attention implementation selection.
+
+        mlp_hidden_mult: Expansion factor for each block MLP hidden dimension.
+        activation: Nonlinearity used inside each block MLP.
+
+        norm_mode: Reserved slot for normalization/residual style selection.
+        layer_norm_eps: Epsilon value for layer normalization.
+
+        dropout: Dropout probability applied in model sublayers.
+        tie_embeddings: Whether to tie token embedding weights to the output head.
+    """
+
     vocab_size: int
     max_seq_len: int
     d_model: int
@@ -44,7 +68,22 @@ class TransformerLMConfig:
 
 class TransformerLM(nn.Module):
     """
-    Minimalistic GPT-style language model.
+    Minimal GPT-style autoregressive language model.
+
+    High-level flow:
+        idx -> token embedding + positional embedding
+            -> transformer blocks
+            -> final layer norm
+            -> vocabulary projection
+
+    Shape contract:
+        input:  (B, T)
+        output: (B, T, V)
+
+    Notes:
+        - The cache path is an optimization for generation, not a semantic change.
+        - Hooks are observational only and must not alter forward behavior.
+        - Sequence length must satisfy T <= max_seq_len.
     """
 
     def __init__(
@@ -99,6 +138,19 @@ class TransformerLM(nn.Module):
         past_kvs: list[KVCache | None],
         keep: int,
     ) -> list[KVCache | None]:
+        """
+        Crop cached keys and values to keep only the most recent positions.
+
+        This preserves the model's max_seq_len contract during incremental
+        decoding when cached context would otherwise grow too large.
+
+        Args:
+            past_kvs: Per-layer KV caches.
+            keep: Number of cached positions to retain.
+
+        Returns:
+            A per-layer KV cache list cropped to the requested history length.
+        """
         if keep <= 0:
             return [None] * len(past_kvs)
 
@@ -120,16 +172,29 @@ class TransformerLM(nn.Module):
 
     def forward_kv(
         self,
-        idx: torch.Tensor,  # (B,T)
+        idx: torch.Tensor,
         past_kvs: list[KVCache | None] | None = None,
         use_cache: bool = True,
         context: CaptureContext | None = None,
     ) -> tuple[torch.Tensor, list[KVCache | None]]:
         """
-        Cache-aware forward for generation.
-        If past_kvs is None: full prompt pass; caches are built.
-        If past_kvs is provided: recommended idx has T=1.
-        Returns (logits, new_kvs).
+        Cache-aware forward pass for autoregressive generation.
+
+        Behavior:
+            - If past_kvs is None, the call is treated as a prompt/warmup pass.
+            - If past_kvs is provided, the call is treated as an incremental
+              decode pass, typically with T=1.
+
+        Args:
+            idx: Token IDs of shape (B, T).
+            past_kvs: Optional per-layer cache from a previous forward_kv call.
+            use_cache: Whether to return updated KV caches.
+            context: Optional capture metadata for observational hooks.
+
+        Returns:
+            A tuple of:
+                - logits of shape (B, T, V)
+                - updated per-layer KV caches
         """
         B, T = idx.shape
         if T > self.cfg.max_seq_len:
@@ -139,6 +204,8 @@ class TransformerLM(nn.Module):
             keep = self.cfg.max_seq_len - T
             if keep < 0:
                 raise ValueError("T exceeds max_seq_len in forward_kv incremental path.")
+            # Crop cached history so cached + current tokens remain within the
+            # configured context window.
             past_kvs = self._crop_past_kvs(past_kvs, keep=keep)
 
         tok = self.token_emb(idx)
@@ -175,8 +242,14 @@ class TransformerLM(nn.Module):
         context: CaptureContext | None = None,
     ) -> torch.Tensor:
         """
-        idx: (B, T) integer tokens.
-        returns: (B, T, vocab_size) logits
+        Standard forward pass without cache usage.
+
+        Args:
+            idx: Token IDs of shape (B, T).
+            context: Optional capture metadata for observational hooks.
+
+        Returns:
+            Logits of shape (B, T, vocab_size).
         """
         B, T = idx.shape
 

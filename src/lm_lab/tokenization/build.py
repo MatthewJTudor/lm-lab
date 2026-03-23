@@ -8,6 +8,19 @@ from lm_lab.tokenization.bpe import BPETokenizer
 
 
 def build_tokenizer(cfg: TokenizerConfig, text: str) -> TokenizerProtocol:
+    """
+    Build a tokenizer instance from the provided tokenizer configuration.
+
+    Args:
+        cfg: Tokenizer construction configuration.
+        text: Training corpus text used to build the tokenizer vocabulary.
+
+    Returns:
+        A tokenizer implementing the TokenizerProtocol interface.
+
+    Raises:
+        ValueError: If the tokenizer mode is unsupported.
+    """
     mode = cfg.mode.strip().lower()
 
     if mode == "char":

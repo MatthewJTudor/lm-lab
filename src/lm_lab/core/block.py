@@ -14,6 +14,18 @@ from lm_lab.hooks.manager import HookManager
 
 @dataclass(frozen=True)
 class TransformerBlockConfig:
+    """
+    Configuration for a single transformer block.
+
+    Attributes:
+        d_model: Residual stream width.
+        n_heads: Number of attention heads.
+        attn_bias: Whether attention projection layers use bias terms.
+        mlp_hidden_mult: Expansion factor for the MLP hidden dimension.
+        activation: Nonlinearity used inside the MLP.
+        dropout: Dropout probability applied in attention and MLP paths.
+    """
+
     d_model: int
     n_heads: int = 1
     attn_bias: bool = False
@@ -27,9 +39,20 @@ class TransformerBlockConfig:
 
 class TransformerBlock(nn.Module):
     """
-    Minimal transformer block (Pre-LN):
+    Minimal pre-LN transformer block.
+
+    Computation:
         x -> x + Attn(LN1(x))
         x -> x + MLP(LN2(x))
+
+    Shape contract:
+        input:  (B, T, C)
+        output: (B, T, C)
+
+    Notes:
+        - Residual shape is preserved across the block.
+        - Hook emission is observational only and must not alter forward behavior.
+        - KV-cache support is provided through forward_kv for incremental decode.
     """
 
     def __init__(
@@ -73,10 +96,20 @@ class TransformerBlock(nn.Module):
         tensor: torch.Tensor,
         context: CaptureContext | None,
     ) -> None:
+        """
+        Emit a structured observation event for this block if hooks are active.
+
+        The emitted tap name is block-qualified (for example,
+        ``blocks.2.post_attn_residual``) so downstream consumers can align
+        observations to a stable structural location.
+        """
         if self.hook_manager is None or context is None:
             return
 
         full_name = f"blocks.{self.block_idx}.{tap_name}"
+
+        # Rebuild context with block-local structural identity while preserving
+        # run/phase/step metadata from the caller.
         tap_context = CaptureContext(
             run_id=context.run_id,
             phase=context.phase,
@@ -100,10 +133,30 @@ class TransformerBlock(nn.Module):
         use_cache: bool = False,
         context: CaptureContext | None = None,
     ) -> tuple[torch.Tensor, KVCache | None]:
-        attn_out, present = self.attn.forward_kv(self.ln1(x), past_kv=past_kv, use_cache=use_cache)
+        """
+        Forward pass with optional KV-cache support.
+
+        Args:
+            x: Residual stream input of shape (B, T, C).
+            past_kv: Previously cached keys and values for this block.
+            use_cache: Whether to return the updated cache.
+            context: Optional capture metadata for observational taps.
+
+        Returns:
+            A tuple of:
+                - updated residual stream of shape (B, T, C)
+                - present KV cache for this block, or None if caching is disabled
+        """
+        # Attention operates on a normalized view of the residual stream.
+        attn_out, present = self.attn.forward_kv(
+            self.ln1(x),
+            past_kv=past_kv,
+            use_cache=use_cache,
+        )
         x = x + attn_out
         self._tap("post_attn_residual", x, context)
 
+        # MLP path preserves residual shape after expansion + projection back.
         x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
         self._tap("post_mlp_residual", x, context)
         return x, present
@@ -113,6 +166,16 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         context: CaptureContext | None = None,
     ) -> torch.Tensor:
+        """
+        Standard forward pass without KV-cache.
+
+        Args:
+            x: Residual stream input of shape (B, T, C).
+            context: Optional capture metadata for observational taps.
+
+        Returns:
+            Updated residual stream of shape (B, T, C).
+        """
         x = x + self.attn(self.ln1(x))
         self._tap("post_attn_residual", x, context)
 

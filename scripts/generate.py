@@ -11,18 +11,35 @@ from lm_lab.tokenization.build import build_tokenizer
 from lm_lab.utils.seed import seed_everything
 from lm_lab.inference.sampling import sample_next_token
 
+
 def _find_latest_checkpoint(runs_dir: Path) -> Path:
     """
-    Find runs/<timestamp>/final.pt with the newest timestamp-like folder name.
+    Find the most recent saved checkpoint under the runs directory.
+
+    Expected layout:
+        runs/<timestamp>/final.pt
+
+    Timestamp directories are assumed to sort lexicographically when formatted
+    as ``YYYYMMDD_HHMMSS``.
+
+    Args:
+        runs_dir: Base directory containing saved run subdirectories.
+
+    Returns:
+        Path to the newest available ``final.pt`` checkpoint.
+
+    Raises:
+        FileNotFoundError: If the runs directory does not exist or no checkpoint
+            files are found.
     """
     if not runs_dir.exists():
-        raise FileNotFoundError(f'runs_dir does not exist: {runs_dir}')
+        raise FileNotFoundError(f"runs_dir does not exist: {runs_dir}")
 
     candidates: list[Path] = []
     for p in runs_dir.iterdir():
         if not p.is_dir():
             continue
-        ckpt = p / 'final.pt'
+        ckpt = p / "final.pt"
         if ckpt.exists():
             candidates.append(ckpt)
 
@@ -32,23 +49,44 @@ def _find_latest_checkpoint(runs_dir: Path) -> Path:
             "Run: python scripts/train.py --config configs/run.toml --save"
         )
 
-    # Timestamps sort lexicographically if formatted like YYYYMMDD_HHMMSS
+    # Timestamp folder names sort correctly under the standard run-dir format.
     candidates.sort(key=lambda x: x.parent.name)
     return candidates[-1]
 
 
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Autoregressive text generation (no KV-cache yet)")
+    """
+    Run autoregressive text generation from a saved checkpoint.
+
+    Responsibilities:
+        - load typed run configuration
+        - resolve generation defaults from config and CLI overrides
+        - rebuild the tokenizer used for training
+        - load model weights from an explicit or inferred checkpoint
+        - generate text with cached or uncached decoding
+
+    Notes:
+        - This script is orchestration-only; model semantics live in core/.
+        - The KV-cache path is an optimization for generation speed, not a
+          semantic change to the model.
+    """
+    parser = argparse.ArgumentParser(description="Autoregressive text generation")
     parser.add_argument("--config", type=str, required=True, help="Path to run.toml")
-    parser.add_argument("--ckpt", type=str, default="",
-                        help="Path to checkpoint (default: latest in runs_dir)"
-                        )
+    parser.add_argument(
+        "--ckpt",
+        type=str,
+        default="",
+        help="Path to checkpoint (default: latest in runs_dir)",
+    )
     parser.add_argument("--runs_dir", type=str, default="runs", help="Where to look for latest checkpoint")
-    parser.add_argument("--prompt", type=str, default="", help="Prompt text (char-level)")
+    parser.add_argument("--prompt", type=str, default="", help="Prompt text to continue from")
     parser.add_argument("--max_new_tokens", type=int, default=-1, help="How many new tokens to generate")
-    parser.add_argument("--temperature", type=float, default=-1.0,
-                        help="0 => greedy; >0 => sampling; -1 => use config if present")
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=-1.0,
+        help="0 => greedy; >0 => sampling; -1 => use config if present",
+    )
     parser.add_argument("--top_k", type=int, default=-1, help="0 => off; -1 => use config if present")
     parser.add_argument("--top_p", type=float, default=-1.0, help="Nucleus sampling p in (0,1]; -1 uses config")
     parser.add_argument("--seed", type=int, default=-1, help="-1 => use config seed; else override")
@@ -57,10 +95,11 @@ def main() -> None:
 
     cfg = load_run_config(args.config)
 
-    # Tokenizer must match training corpus for this v0 setup
+    # Rebuild the tokenizer from the configured corpus so token IDs match training.
     tok = build_tokenizer(cfg.tokenizer, cfg.data_text)
 
-    # Resolve gen defaults: CLI > config.gen > hard defaults
+    # Resolve generation defaults with precedence:
+    # CLI override > config.gen > local hard default.
     gen_temp: float = 0.0
     gen_top_k: int = 0
     gen_top_p: float = 1.0
@@ -88,10 +127,10 @@ def main() -> None:
         cfg.gen.max_new_tokens if cfg.gen else 100
     )
 
-    # Determinism (CPU baseline)
+    # Establish deterministic generation behavior under the resolved seed.
     seed_everything(replace(cfg.seed, seed=gen_seed))
 
-    # Build model, load weights
+    # Build the model after tokenizer reconstruction so vocab_size matches the checkpoint.
     from lm_lab.core.model import TransformerLM  # keep script boundary clean
 
     model_cfg = replace(cfg.model, vocab_size=tok.vocab_size)
@@ -102,39 +141,53 @@ def main() -> None:
     model.load_state_dict(state)
     model.eval()
 
-    # Encode prompt
+    # Encode the prompt into the model's token space.
     prompt_ids = tok.encode(args.prompt)
     if len(prompt_ids) == 0:
-        # If empty prompt, start from a single <unk> (id=1) just to have a token.
-        prompt_ids = [tok.stoi[tok.UNK]]
+        # Fallback so generation always has at least one starting token.
+        prompt_ids = [tok.stoi[tok.unk_token]]
 
     idx = torch.tensor(prompt_ids, dtype=torch.long).unsqueeze(0)  # (1, T)
 
     past_kvs = None
     with torch.inference_mode():
         if args.use_kv_cache:
-            # Warmup on cropped prompt
+            # Warm up the cache on the visible prompt window.
             idx_cond = idx[:, -cfg.model.max_seq_len:].contiguous()
             logits, past_kvs = model.forward_kv(idx_cond, past_kvs=None, use_cache=True)
 
             for _ in range(max_new):
-                # If we've exceeded context, rebuild cache from last window
+                # If total context has outgrown the model window, rebuild cache from
+                # the most recent visible span.
                 if idx.size(1) > cfg.model.max_seq_len:
                     idx_cond = idx[:, -cfg.model.max_seq_len:].contiguous()
                     logits, past_kvs = model.forward_kv(idx_cond, past_kvs=None, use_cache=True)
                 else:
+                    # Incremental decode path: feed only the newest token and append
+                    # to the cached history.
                     last = idx[:, -1:].contiguous()
                     logits, past_kvs = model.forward_kv(last, past_kvs=past_kvs, use_cache=True)
 
                 next_logits = logits[0, -1, :]
-                next_id = sample_next_token(next_logits, temperature=gen_temp, top_k=gen_top_k, top_p=gen_top_p)
+                next_id = sample_next_token(
+                    next_logits,
+                    temperature=gen_temp,
+                    top_k=gen_top_k,
+                    top_p=gen_top_p,
+                )
                 idx = torch.cat([idx, torch.tensor([[next_id]], dtype=torch.long)], dim=1)
         else:
             for _ in range(max_new):
+                # Uncached path recomputes over the currently visible context window.
                 idx_cond = idx[:, -cfg.model.max_seq_len:]
                 logits = model(idx_cond)
                 next_logits = logits[0, -1, :]
-                next_id = sample_next_token(next_logits, temperature=gen_temp, top_k=gen_top_k, top_p=gen_top_p)
+                next_id = sample_next_token(
+                    next_logits,
+                    temperature=gen_temp,
+                    top_k=gen_top_k,
+                    top_p=gen_top_p,
+                )
                 idx = torch.cat([idx, torch.tensor([[next_id]], dtype=torch.long)], dim=1)
 
     out = tok.decode(idx[0].tolist())

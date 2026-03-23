@@ -5,8 +5,19 @@ import re
 from typing import Iterable
 
 
-# Normalize common Unicode punctuation to simpler ASCII-ish forms.
 def _normalize_text(text: str) -> str:
+    """
+    Normalize common Unicode punctuation to simpler ASCII-like forms.
+
+    This keeps tokenization behavior more stable across corpora that mix
+    typographic and plain-text punctuation.
+
+    Args:
+        text: Raw input text.
+
+    Returns:
+        Normalized text.
+    """
     return (
         text.replace("’", "'")
             .replace("‘", "'")
@@ -30,6 +41,16 @@ _WORD_RE = re.compile(
 
 @dataclass(frozen=True)
 class WordTokenizer:
+    """
+    Deterministic word-level tokenizer with simple punctuation-aware splitting.
+
+    Notes:
+        - Text is normalized before tokenization.
+        - Vocabulary is built from sorted unique token pieces.
+        - Unknown pieces map to ``<unk>`` during encoding.
+        - Special tokens are skipped during decode.
+    """
+
     stoi: dict[str, int]
     itos: dict[int, str]
     unk_token: str = "<unk>"
@@ -38,6 +59,15 @@ class WordTokenizer:
 
     @classmethod
     def build(cls, text: str) -> "WordTokenizer":
+        """
+        Build a word tokenizer from corpus text.
+
+        Args:
+            text: Corpus used to construct the vocabulary.
+
+        Returns:
+            A fully constructed WordTokenizer.
+        """
         specials = ["<unk>", "<bos>", "<eos>"]
         pieces = cls._tokenize_text(text)
 
@@ -50,19 +80,54 @@ class WordTokenizer:
 
     @staticmethod
     def _tokenize_text(text: str) -> list[str]:
+        """
+        Split normalized text into word-level token pieces.
+
+        Args:
+            text: Raw input text.
+
+        Returns:
+            Token piece sequence.
+        """
         text = _normalize_text(text)
         return _WORD_RE.findall(text)
 
     @property
     def vocab_size(self) -> int:
+        """Return the size of the tokenizer vocabulary."""
         return len(self.stoi)
 
     def encode(self, s: str) -> list[int]:
+        """
+        Encode text into token IDs.
+
+        Args:
+            s: Input text.
+
+        Returns:
+            Token ID sequence.
+        """
         pieces = self._tokenize_text(s)
         unk_id = self.stoi[self.unk_token]
         return [self.stoi.get(piece, unk_id) for piece in pieces]
 
     def decode(self, ids: Iterable[int]) -> str:
+        """
+        Decode token IDs back into text using simple spacing rules.
+
+        Args:
+            ids: Token ID sequence.
+
+        Returns:
+            Reconstructed text.
+
+        Notes:
+            - Special tokens are omitted from the output.
+            - Spacing is reconstructed heuristically around punctuation, quotes,
+              brackets, and newlines.
+            - Decode aims for readable text, not exact byte-for-byte inversion
+              of the original source string.
+        """
         specials = {self.unk_token, self.bos_token, self.eos_token}
         tokens: list[str] = []
 
@@ -91,15 +156,15 @@ class WordTokenizer:
 
             if tok == '"':
                 if not out or prev_tok == "\n":
-                    # opening quote at start of text/line
+                    # Opening quote at the start of text or line.
                     out.append('"')
                     quote_open = True
                 elif quote_open:
-                    # closing quote attaches to previous token
+                    # Closing quote attaches to the preceding token.
                     out.append('"')
                     quote_open = False
                 else:
-                    # opening quote after normal text gets a leading space
+                    # Opening quote after normal text receives a leading space.
                     out.append(' "')
                     quote_open = True
 
@@ -115,7 +180,7 @@ class WordTokenizer:
             elif prev_tok in no_space_after:
                 out.append(tok)
             elif prev_tok == '"':
-                # token after opening quote attaches directly
+                # Token after an opening quote attaches directly.
                 out.append(tok)
             else:
                 out.append(" " + tok)
