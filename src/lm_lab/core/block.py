@@ -105,6 +105,7 @@ class TransformerBlock(nn.Module):
         self._tap("post_attn_residual", x, context)
 
         x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
+        self._tap("post_mlp_residual", x, context)
         return x, present
 
     def forward(
@@ -116,4 +117,5 @@ class TransformerBlock(nn.Module):
         self._tap("post_attn_residual", x, context)
 
         x = x + self.drop(self.fc2(self.act(self.fc1(self.ln2(x)))))
+        self._tap("post_mlp_residual", x, context)
         return x
