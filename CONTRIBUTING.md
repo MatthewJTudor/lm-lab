@@ -45,7 +45,7 @@ The language model core is intentionally minimal and must remain free of logic t
     
 - Performance improvements that do not alter semantics
     
-- Diagnostic and evaluation systems **outside core model computation**
+- Diagnostic and evaluation systems must remain ***outside core model computation*** unless strictly observational and non-semantic
     
 
 ---
@@ -179,6 +179,19 @@ These may include:
     
 - all diagnostic systems must preserve determinism when run under fixed conditions
     
+- step identity must not be overloaded
+
+- use `global_step` for training/evaluation progression
+
+- use `decode_step` for autoregressive generation
+
+- `phase` must always be explicitly defined (train, eval, generate)
+
+- every captured tensor must be associated with a unique `event_id` minted by the capture/manager layer
+
+- event identity must not be created inside model code (`core/`)
+
+- composite context fields (run_id, phase, global_step, decode_step, layer, tap_name, etc.) must be preserved alongside `event_id`
 
 ### Alignment Principle
 
@@ -241,6 +254,16 @@ Future systems must follow these constraints:
     
 - no transformation during capture
     
+### Capture Semantics
+
+- the atomic capture event is the full tensor emitted at a named tap
+- partial tensor slicing (token ranges, block ranges, head ranges) must not be encoded as native capture events
+- all slicing, projection, and derived analysis must occur downstream of capture
+
+### Tap Naming Stability
+
+- tap names must be stable, structural, and semantically consistent across runs
+- changes to tap naming require explicit documentation updates
 
 ### Experimental Systems
 

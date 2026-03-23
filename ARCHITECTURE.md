@@ -164,20 +164,39 @@ Own orchestration only:
 
 ---
 
-### `hooks/` (reserved)
+### `hooks/`
 
-Future:
+Owns forward-pass observation dispatch:
+
+- explicit named tap registration
+- callback dispatch
+- observation enable/disable behavior
+
+**Constraints:**
 
 - forward observation only
+- must not modify tensors
+- must not alter gradients, logits, cache behavior, or model semantics
+- must remain deterministic under fixed inputs and seed
     
 
 ---
 
-### `capture/` (reserved)
+### `capture/`
 
-Future:
+Owns structured observation event definitions:
 
-- activation storage
+- capture context
+- finalized capture metadata
+- capture event payloads
+- later persistence payload/schema support
+
+**Constraints:**
+
+- capture raw tensors only
+- no projection or interpretation at capture time
+- no metric computation at capture time
+- no ARF logic at capture time
     
 
 ---
@@ -548,27 +567,163 @@ Coverage includes:
     
 - analysis layers (external to core)
     
+---
+
+## 15. Capture and Synchronization Contracts
+
+The LM-Lab observability architecture is built around a strict distinction between:
+
+1. **source LM events**
+2. **derived analysis records**
+
+### 15.1 Source LM Event Semantics
+
+The atomic capture event is the **whole emitted tensor at a named tap**.
+
+The capture layer does not treat token slices, block slices, head slices, or projections as separate native LM events.
+
+Those are downstream derivations.
+
+This preserves:
+
+- a simple deterministic LM event model
+- clean alignment with standard LM metrics
+- freedom for downstream systems to analyze arbitrary tensor subregions
+
+### 15.2 Capture Context vs Finalized Metadata
+
+Tap sites provide **semantic context** only.
+
+Examples:
+
+- run identity
+- phase
+- step identity
+- layer
+- tap name
+- sample/prompt identity
+- regime metadata
+
+The hook/capture manager is responsible for:
+
+- minting event identity
+- attaching dtype and device
+- attaching informational timestamp
+- finalizing the event payload
+
+This keeps persistence and synchronization ownership outside the core model code.
+
+### 15.3 Event Identity
+
+Each source LM capture event must receive a single explicit primary key:
+
+- `event_id`
+
+This is the canonical join key for downstream systems.
+
+Composite context fields must also be preserved for interpretability and query convenience, including at minimum:
+
+- `run_id`
+- `phase`
+- `global_step` (nullable where not applicable)
+- `decode_step` (nullable where not applicable)
+- `seed`
+- `layer`
+- `tap_name`
+- `sample_id` (nullable)
+- `prompt_id` (nullable)
+- `regime_label`
+- `knob_name` (nullable)
+- `knob_value` (nullable)
+
+### 15.4 Step Semantics
+
+Step identity must not be overloaded.
+
+Use distinct fields for different execution contexts:
+
+- `global_step` for training/evaluation progression
+- `decode_step` for autoregressive generation progression
+
+`phase` must remain explicit, e.g.:
+
+- `train`
+- `eval`
+- `generate`
+
+### 15.5 Timestamp Semantics
+
+Wall-clock timestamp is informational only.
+
+It may be useful for provenance or debugging, but it is never:
+
+- a primary identity field
+- a synchronization key
+- a determinism/equivalence key
+
+Structured identifiers define synchronization.
+
+### 15.6 ARF Boundary
+
+ARF is external to the core LM observability layer.
+
+ARF may consume source LM tensors from aligned tap points, but ARF must not:
+
+- alter the LM forward pass
+- redefine native LM event semantics
+- perform projection inside LM capture
+- contaminate standard LM metrics
+
+ARF-derived outputs must reference source LM events through `source_event_id` (or equivalent).
+
+### 15.7 Capture Purity
+
+Capture is a pure recording boundary.
+
+Capture must not:
+
+- compute projections
+- compute metrics
+- normalize tensors
+- compress semantics into derived summaries
+- perform interpretation
+
+Capture records what occurred.
+Analysis happens later.
+
+### 15.8 Tap Naming Stability
+
+Tap names are part of the synchronization contract.
+
+They must be:
+
+- explicit
+- structural
+- stable across runs for the same architecture
+- semantically tied to a consistent computation point
+
+Example:
+
+- `blocks.{i}.post_attn_residual`
+
+Tap names must not drift casually over time, because downstream alignment depends on them.
 
 ---
 
-## 15. Non-Goals
+## 16. Non-Goals
 
 The core model explicitly does **not**:
 
-- include experimental logic
-    
+- include ARF projection logic
 - perform analysis during forward pass
-    
 - modify tensors via hooks
-    
-- depend on external frameworks (e.g., Hydra)
-    
-- optimize for performance over clarity
-    
+- depend on experiment orchestration frameworks
+- overload capture with interpretation logic
+- optimize for performance over clarity    
 
 ---
 
-## 16. Guiding Principle
+## 17. Guiding Principle
 
 > The architecture must remain:
 > 

@@ -8,7 +8,7 @@ It serves as both:
 
 - a **clean reference implementation** of a transformer LM
     
-- a **stable foundation** for advanced experimentation (hooks, capture systems, ARF)
+- a **stable foundation** for advanced experimentation (hooks, structured capture, ARF)
     
 
 ---
@@ -117,7 +117,7 @@ If something works, you should be able to explain _why_.
 
 ### Testing
 
-- **54 pytest tests**
+- **91 pytest tests**
     
     - attention correctness
         
@@ -150,8 +150,8 @@ lm-lab/
 │   ├── inference/
 │   ├── config/
 │   ├── utils/
-│   ├── capture/   # reserved
-│   └── hooks/     # reserved
+│   ├── capture/     # structured tensor capture (observational only)
+│   └── hooks/       # forward-pass observation (non-intrusive)
 ├── tests/
 └── requirements.txt
 ```
@@ -270,6 +270,8 @@ Correctness is verified structurally:
 - Activation capture pipeline
     
 - Structured snapshot storage
+
+- Capture records full tensors at named tap points; all slicing and analysis occur downstream.
     
 
 ### Experimental (separate layer)
