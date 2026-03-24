@@ -95,3 +95,22 @@ def format_metric_record(
             metric_parts.append(f"{k}={v:.6f}")
 
     return prefix + " | " + " | ".join(metric_parts)
+
+def fmt(record: LMMetricRecord) -> str:
+    if record.phase == "train":
+        loss_key = "train_loss"
+    elif record.phase == "eval":
+        loss_key = "eval_loss"
+    else:
+        loss_key = "loss"
+
+    parts = [
+        f"loss {record.metrics.get(loss_key, 0.0):.3f}",
+        f"acc {record.metrics.get('token_accuracy', 0.0):.3f}",
+        f"rank {record.metrics.get('next_token_rank_mean', 0.0):.1f}",
+    ]
+
+    if record.phase == "train" and "grad_norm_total" in record.metrics:
+        parts.append(f"grad {record.metrics['grad_norm_total']:.3f}")
+
+    return " | ".join(parts)

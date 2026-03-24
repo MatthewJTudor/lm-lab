@@ -8,6 +8,7 @@ import torch
 
 from lm_lab.config.load import load_run_config
 from lm_lab.tokenization.build import build_tokenizer
+from lm_lab.tokenization.io import load_tokenizer
 from lm_lab.utils.seed import seed_everything
 from lm_lab.inference.sampling import sample_next_token
 
@@ -95,8 +96,17 @@ def main() -> None:
 
     cfg = load_run_config(args.config)
 
-    # Rebuild the tokenizer from the configured corpus so token IDs match training.
-    tok = build_tokenizer(cfg.tokenizer, cfg.data_text)
+    # Attempt to pull the tokenizer from run directory and failing that,
+    # rebuild the tokenizer from the configured corpus so token IDs match training.
+    ckpt_path = Path(args.ckpt) if args.ckpt else _find_latest_checkpoint(Path(args.runs_dir))
+    run_dir = ckpt_path.parent
+    tok_path = run_dir / "tokenizer.json"
+
+    if tok_path.exists():
+        tok = load_tokenizer(tok_path)
+    else:
+        print(f"[tokenizer] no saved tokenizer found at {tok_path}; rebuilding from corpus")
+        tok = build_tokenizer(cfg.tokenizer, cfg.data_text)
 
     # Resolve generation defaults with precedence:
     # CLI override > config.gen > local hard default.

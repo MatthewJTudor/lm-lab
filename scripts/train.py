@@ -19,8 +19,9 @@ from lm_lab.metrics.logits import (
     max_probability_mean,
     logit_entropy_mean,
 )
-from lm_lab.metrics.schema import LMMetricRecord, format_metric_record
+from lm_lab.metrics.schema import LMMetricRecord, format_metric_record, fmt
 from lm_lab.tokenization.build import build_tokenizer
+from lm_lab.tokenization.io import save_tokenizer
 from lm_lab.utils.seed import seed_everything
 
 
@@ -135,6 +136,17 @@ def eval_step(
 
     return float(loss.item()), logits
 
+def format_compact_line(train_record, eval_record):
+    if train_record.global_step is not None:
+        step = train_record.global_step
+    else:
+        step = train_record.decode_step
+
+    train_part = f"train | {fmt(train_record)}"
+    eval_part = f"eval | {fmt(eval_record)}"
+
+    return f"step {step} | {train_part} | {eval_part}"
+
 
 def main() -> None:
     """
@@ -156,6 +168,13 @@ def main() -> None:
     parser.add_argument("--config", type=str, required=True, help="Path to run.toml")
     parser.add_argument("--save", action="store_true", help="Save run artifacts to runs/<timestamp>/")
     parser.add_argument("--runs_dir", type=str, default="runs", help="Base output directory for --save")
+    parser.add_argument(
+        "--print_mode",
+        type=str,
+        default="compact",
+        choices=["full", "compact", "off"],
+        help="Console logging mode",
+    )
     args = parser.parse_args()
 
     cfg = load_run_config(args.config)
@@ -308,13 +327,21 @@ def main() -> None:
                 "next_token_rank_mean",
             ]
 
-            print(format_metric_record(train_record, train_metric_order))
-            print(format_metric_record(eval_record, eval_metric_order))
+            if args.print_mode == "full":
+                print(format_metric_record(train_record, train_metric_order))
+                print(format_metric_record(eval_record, eval_metric_order))
+
+            elif args.print_mode == "compact":
+                print(format_compact_line(train_record, eval_record))
+
+            elif args.print_mode == "off":
+                pass
 
     # Optional save keeps artifacts local to the script boundary.
     if args.save:
         assert run_dir is not None
         shutil.copy2(args.config, run_dir / "config.toml")
+        save_tokenizer(tok, run_dir / "tokenizer.json")
         torch.save(model.state_dict(), run_dir / "final.pt")
         print(f"saved: {run_dir}")
 
